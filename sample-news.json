@@ -1,0 +1,14 @@
+[
+  {
+    "title": "Launcher Update",
+    "date": "2026-01-01",
+    "category": "Launcher",
+    "body": "The launcher news feed is working. Replace this sample post with your own update."
+  },
+  {
+    "title": "Server News",
+    "date": "2026-01-01",
+    "category": "News",
+    "body": "Add patch notes, event information, or maintenance notices here."
+  }
+]
