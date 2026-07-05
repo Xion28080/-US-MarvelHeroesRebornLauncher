@@ -6,3 +6,6 @@ obj/
 *.pdb
 *.nupkg
 TestResults/
+MHRebornLauncher.Updater/bin/
+MHRebornLauncher.Updater/obj/
+release-package/

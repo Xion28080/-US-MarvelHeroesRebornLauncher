@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
@@ -146,11 +147,17 @@ public sealed class UpdateService
             throw new FileNotFoundException("The updater helper was not found. Reinstall the launcher package and try again.", updaterPath);
         }
 
+        // If the release zip was downloaded from a browser, Windows may attach Mark-of-the-Web
+        // metadata to the extracted updater. Best-effort remove it before launching the helper.
+        TryRemoveMarkOfTheWeb(updaterPath);
+        TryRemoveMarkOfTheWeb(packagePath);
+
         ProcessStartInfo startInfo = new()
         {
             FileName = updaterPath,
             UseShellExecute = true,
-            WorkingDirectory = installDir
+            WorkingDirectory = installDir,
+            Verb = "runas"
         };
 
         startInfo.ArgumentList.Add("--package");
@@ -163,8 +170,38 @@ public sealed class UpdateService
         startInfo.ArgumentList.Add(processId.ToString());
         startInfo.ArgumentList.Add("--restart");
 
-        Process.Start(startInfo);
+        try
+        {
+            Process.Start(startInfo);
+        }
+        catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        {
+            throw new InvalidOperationException(
+                "The updater was blocked or the Windows security prompt was canceled. " +
+                "Please approve the updater prompt to install the launcher update. " +
+                "If Windows shows 'Windows protected your PC', choose More info, then Run anyway. " +
+                "You can also right-click the downloaded release zip, choose Properties, check Unblock, then extract it again.",
+                ex);
+        }
+
         Application.Current.Shutdown();
+    }
+
+    private static void TryRemoveMarkOfTheWeb(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+
+        try
+        {
+            string zoneIdentifier = path + ":Zone.Identifier";
+            if (File.Exists(zoneIdentifier))
+                File.Delete(zoneIdentifier);
+        }
+        catch
+        {
+            // Best effort only. If Windows still blocks the helper, the caller shows a clear message.
+        }
     }
 
     private static bool IsPreferredAsset(string assetName, string exactName, string prefix)
