@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<OutputType>WinExe</OutputType>
+		<TargetFramework>net8.0-windows</TargetFramework>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<AssemblyName>MHRebornLauncher.Updater</AssemblyName>
+		<RootNamespace>MHRebornLauncher.Updater</RootNamespace>
+		<ApplicationManifest>app.manifest</ApplicationManifest>
+		<Version>1.0.2</Version>
+		<AssemblyVersion>1.0.2.0</AssemblyVersion>
+		<FileVersion>1.0.2.0</FileVersion>
+	</PropertyGroup>
+
+</Project>

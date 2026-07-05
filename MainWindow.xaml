@@ -1,0 +1,208 @@
+<Window x:Class="MHRebornLauncher.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Marvel Heroes Reborn Launcher"
+        Width="1024" Height="720"
+        MinWidth="920" MinHeight="600"
+        WindowStartupLocation="CenterScreen">
+
+    <Grid Background="{StaticResource BgBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="86"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="34"/>
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Background="#0B0F18" BorderBrush="#263149" BorderThickness="0,0,0,1">
+            <Grid Margin="24,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="MARVEL HEROES REBORN" FontSize="28" FontWeight="Bold" Foreground="{StaticResource AccentBrush}"/>
+                        <Border Background="#263149" CornerRadius="4" Padding="8,3" Margin="12,6,0,0" VerticalAlignment="Center">
+                            <TextBlock x:Name="LauncherVersionText"
+                                       Text="Launcher"
+                                       FontSize="11"
+                                       Foreground="{StaticResource MutedTextBrush}"/>
+                        </Border>
+                    </StackPanel>
+                    <TextBlock Text="Private Server Launcher" FontSize="13" Foreground="{StaticResource MutedTextBrush}" Margin="1,2,0,0"/>
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Ellipse x:Name="GameFoundDot" Width="10" Height="10" Fill="#E05252" Margin="0,0,8,0"/>
+                    <TextBlock x:Name="GameFoundText" Text="Game not found" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="1" Margin="24">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="335"/>
+                <ColumnDefinition Width="18"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" Background="{StaticResource PanelBrush}" CornerRadius="10" Padding="24">
+                <Grid>
+                    <Grid x:Name="LoginPanel">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel>
+                            <TextBlock Text="Account Login" FontSize="23" FontWeight="SemiBold"/>
+                            <TextBlock Text="Enter your Marvel Heroes Reborn account to launch the game." TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}" Margin="0,4,0,22"/>
+
+                            <TextBlock Text="Email or account name" Foreground="{StaticResource MutedTextBrush}" Margin="0,0,0,6"/>
+                            <TextBox x:Name="EmailTextBox" Height="31"/>
+
+                            <TextBlock Text="Password" Foreground="{StaticResource MutedTextBrush}" Margin="0,16,0,6"/>
+                            <PasswordBox x:Name="PasswordBox" Height="31"/>
+
+                            <CheckBox x:Name="RememberMeCheckBox" Content="Remember me on this PC" Margin="0,16,0,18"/>
+
+                            <Button x:Name="LoginButton" Content="LOG IN" Height="42" Click="LoginButton_Click"/>
+                            <TextBlock x:Name="LoginErrorText" Foreground="{StaticResource DangerBrush}" TextWrapping="Wrap" Margin="0,14,0,0"/>
+
+                            <TextBlock Margin="0,14,0,0"
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       TextWrapping="Wrap">
+                                <Run Text="Don't have an account? "/>
+                                <Hyperlink NavigateUri="https://play.omeganode.org/Dashboard/"
+                                           RequestNavigate="CreateAccountLink_RequestNavigate">
+                                    <Run Text="Create one here."/>
+                                </Hyperlink>
+                            </TextBlock>
+
+                            <Border Background="#10182A" BorderBrush="#30415F" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,22,0,0">
+                                <TextBlock Text="Tip: You can enter only your account name. The launcher will add @omeganode.org automatically." Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" FontSize="12"/>
+                            </Border>
+                        </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+
+                    <Grid x:Name="AccountPanel" Visibility="Collapsed">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel>
+                            <TextBlock Text="Signed In" FontSize="23" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="LoggedInEmailText" Foreground="{StaticResource AccentBrush}" TextWrapping="Wrap" Margin="0,8,0,18"/>
+
+                            <Button x:Name="PlayButton" Content="PLAY" Height="52" FontSize="18" Click="PlayButton_Click"/>
+                            <Button Content="LOG OUT / SWITCH ACCOUNT" Margin="0,14,0,0" Height="36" Background="#2B3652" Foreground="{StaticResource TextBrush}" Click="LogoutButton_Click"/>
+
+                            <Separator Margin="0,24,0,18" Background="#31405F"/>
+
+                            <TextBlock Text="Launcher Status" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10"/>
+
+                            <Border Background="#10182A" BorderBrush="#30415F" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,10">
+                                <StackPanel>
+                                    <TextBlock Text="Game Detection" FontWeight="SemiBold"/>
+                                    <TextBlock x:Name="GamePathText" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,4,0,0" FontSize="12"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Background="#10182A" BorderBrush="#30415F" BorderThickness="1" CornerRadius="8" Padding="12">
+                                <StackPanel>
+                                    <TextBlock Text="Launch Mode" FontWeight="SemiBold"/>
+                                    <TextBlock x:Name="LaunchModeText" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,4,0,0" FontSize="12"/>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <Border Grid.Column="2" Background="{StaticResource PanelBrush}" CornerRadius="10" Padding="22">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <DockPanel Margin="0,0,0,16">
+                        <StackPanel DockPanel.Dock="Left">
+                            <TextBlock Text="News &amp; Patch Notes" FontSize="23" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="NewsStatusText" Text="Loading news..." Foreground="{StaticResource MutedTextBrush}"/>
+                        </StackPanel>
+                        <Button Content="REFRESH" Width="100" Height="42" DockPanel.Dock="Right" Click="RefreshNewsButton_Click"/>
+                    </DockPanel>
+
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl x:Name="NewsItemsControl">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Background="{StaticResource CardBrush}" CornerRadius="8" Padding="16" Margin="0,0,0,12">
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                            </Grid.RowDefinitions>
+
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+
+                                            <TextBlock Grid.Row="0" Grid.Column="0"
+                                                       Text="{Binding Title}"
+                                                       FontSize="18"
+                                                       FontWeight="SemiBold"
+                                                       TextWrapping="Wrap"
+                                                       Margin="0,0,12,4"/>
+
+                                            <Border Grid.Row="0" Grid.Column="1"
+                                                    Background="#35476A"
+                                                    CornerRadius="4"
+                                                    Padding="8,4"
+                                                    VerticalAlignment="Top"
+                                                    HorizontalAlignment="Right">
+                                                <TextBlock Text="{Binding Category}" FontSize="11" Foreground="{StaticResource AccentBrush}" FontWeight="SemiBold"/>
+                                            </Border>
+
+                                            <TextBlock Grid.Row="1" Grid.ColumnSpan="2"
+                                                       Text="{Binding Date}"
+                                                       FontSize="12"
+                                                       Foreground="{StaticResource MutedTextBrush}"
+                                                       Margin="0,2,0,10"/>
+
+                                            <StackPanel Grid.Row="2" Grid.ColumnSpan="2">
+                                                <TextBlock Text="{Binding PreviewText}"
+                                                           FontSize="13"
+                                                           Foreground="#D7DEEF"
+                                                           TextWrapping="Wrap"
+                                                           LineHeight="20"
+                                                           Margin="0,0,0,12"/>
+
+                                                <Button Content="VIEW POST"
+                                                        Width="96"
+                                                        Height="30"
+                                                        HorizontalAlignment="Left"
+                                                        Tag="{Binding Url}"
+                                                        Click="ViewPostButton_Click"/>
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <Border Grid.Row="2" Background="#0B0F18" BorderBrush="#263149" BorderThickness="0,1,0,0">
+            <Grid Margin="24,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="FooterText" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" FontSize="12"/>
+                <TextBlock Grid.Column="1" Text="Marvel Heroes Reborn" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" FontSize="12"/>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>
