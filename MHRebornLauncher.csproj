@@ -10,9 +10,9 @@
 		<RootNamespace>MHRebornLauncher</RootNamespace>
 		<ApplicationIcon>Assets\MHRebornLauncher.ico</ApplicationIcon>
 
-		<Version>1.0.2</Version>
-		<AssemblyVersion>1.0.2.0</AssemblyVersion>
-		<FileVersion>1.0.2.0</FileVersion>
+		<Version>1.1.0</Version>
+		<AssemblyVersion>1.1.0.0</AssemblyVersion>
+		<FileVersion>1.1.0.0</FileVersion>
 
 		<RuntimeIdentifier>win-x64</RuntimeIdentifier>
 		<SelfContained>true</SelfContained>
@@ -25,11 +25,21 @@
 	</PropertyGroup>
 
 	<ItemGroup>
+		<PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3405.78" />
+	</ItemGroup>
+
+	<ItemGroup>
 		<Compile Remove="MHRebornLauncher.Updater\**\*.cs" />
 		<EmbeddedResource Remove="MHRebornLauncher.Updater\**\*" />
 		<None Remove="MHRebornLauncher.Updater\**\*" />
 		<Page Remove="MHRebornLauncher.Updater\**\*" />
 		<ApplicationDefinition Remove="MHRebornLauncher.Updater\**\*" />
+	</ItemGroup>
+
+
+	<ItemGroup>
+		<None Remove="Assets\OmegaNodeLogo.png" />
+		<Resource Include="Assets\OmegaNodeLogo.png" />
 	</ItemGroup>
 
 </Project>

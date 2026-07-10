@@ -1,7 +1,7 @@
 param(
     [string]$Configuration = "Release",
     [string]$Runtime = "win-x64",
-    [string]$Version = "1.0.1"
+    [string]$Version = "1.1.0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,9 +16,17 @@ if (Test-Path $out) {
 }
 New-Item -ItemType Directory -Path $out | Out-Null
 
-dotnet publish (Join-Path $root "MHRebornLauncher.csproj") -c $Configuration -r $Runtime --self-contained true /p:PublishSingleFile=true /p:PublishTrimmed=false /p:EnableCompressionInSingleFile=true
+function Invoke-Publish {
+    param([string]$ProjectPath)
 
-dotnet publish (Join-Path $root "MHRebornLauncher.Updater\MHRebornLauncher.Updater.csproj") -c $Configuration -r $Runtime --self-contained true /p:PublishSingleFile=true /p:PublishTrimmed=false /p:EnableCompressionInSingleFile=true
+    dotnet publish $ProjectPath -c $Configuration -r $Runtime --self-contained true /p:PublishSingleFile=true /p:PublishTrimmed=false /p:EnableCompressionInSingleFile=true
+    if ($LASTEXITCODE -ne 0) {
+        throw "Publishing failed for $ProjectPath (exit code $LASTEXITCODE)."
+    }
+}
+
+Invoke-Publish (Join-Path $root "MHRebornLauncher.csproj")
+Invoke-Publish (Join-Path $root "MHRebornLauncher.Updater\MHRebornLauncher.Updater.csproj")
 
 Copy-Item (Join-Path $launcherPublish "MHRebornLauncher.exe") (Join-Path $out "MHRebornLauncher.exe") -Force
 Copy-Item (Join-Path $updaterPublish "MHRebornLauncher.Updater.exe") (Join-Path $out "MHRebornLauncher.Updater.exe") -Force

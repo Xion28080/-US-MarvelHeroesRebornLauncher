@@ -1,11 +1,25 @@
+# Visual Studio / .NET build output
 .vs/
-bin/
-obj/
+**/bin/
+**/obj/
+TestResults/
+
+# User-specific IDE and publish settings
 *.user
 *.suo
+*.pubxml.user
+
+# Build and release artifacts
+release-package/
 *.pdb
 *.nupkg
-TestResults/
-MHRebornLauncher.Updater/bin/
-MHRebornLauncher.Updater/obj/
-release-package/
+*.zip
+
+# Local WebView2 browser data
+*.WebView2/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
