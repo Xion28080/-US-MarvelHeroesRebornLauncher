@@ -27,6 +27,7 @@ public partial class MainWindow : Window
     private readonly UpdateService _updateService = new();
     private readonly PortalService _portalService = new();
     private readonly SavedLoginService _savedLoginService = new();
+    private readonly SettingsService _settingsService = new();
     private readonly DispatcherTimer _serverStatusTimer;
     private readonly DispatcherTimer _eventStatusTimer;
     private List<NewsPost> _posts = [];
@@ -65,6 +66,17 @@ public partial class MainWindow : Window
         _serverStatusTimer.Start();
         _eventStatusTimer.Start();
         _ = CheckForLauncherUpdateAsync();
+    }
+
+    private void OptionsButton_Click(object sender, RoutedEventArgs e)
+    {
+        var optionsWindow = new OptionsWindow(_settings, _settingsService)
+        {
+            Owner = this
+        };
+
+        optionsWindow.ShowDialog();
+        FooterText.Text = "Options saved.";
     }
 
     private void ApplyRank(int userLevel)

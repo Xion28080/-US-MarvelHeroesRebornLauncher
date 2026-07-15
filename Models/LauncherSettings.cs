@@ -12,6 +12,8 @@ public sealed class LauncherSettings
     public string LoginApiUrl { get; set; } = "https://play.omeganode.org/launcher/login.php";
     public string PortalTokenApiUrl { get; set; } = "https://play.omeganode.org/launcher/portal-token.php";
 
+    public bool SkipLaunchSplash { get; set; } = false;
+    public bool SkipStartupMovies { get; set; } = false;
 
     public bool EnableLauncherUpdates { get; set; } = true;
     public string GitHubOwner { get; set; } = "Xion28080";

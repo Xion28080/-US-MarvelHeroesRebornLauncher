@@ -33,14 +33,23 @@ public sealed class GameLauncherService
 
     private static string[] BuildArgumentArray(LauncherSettings settings, string emailAddress, string password)
     {
-        return
+        List<string> arguments =
         [
             "-nosteam",
             "-robocopy",
-            $"-siteconfigurl={settings.SiteConfigUrl}",
-            $"-emailaddress={emailAddress}",
-            $"-password={password}"
+            $"-siteconfigurl={settings.SiteConfigUrl}"
         ];
+
+        if (settings.SkipLaunchSplash)
+            arguments.Add("-nosplash");
+
+        if (settings.SkipStartupMovies)
+            arguments.Add("-nostartupmovies");
+
+        arguments.Add($"-emailaddress={emailAddress}");
+        arguments.Add($"-password={password}");
+
+        return [.. arguments];
     }
 
     private static string QuoteIfNeeded(string value)

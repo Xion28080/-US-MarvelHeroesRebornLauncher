@@ -19,7 +19,13 @@
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock x:Name="LauncherVersionText" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" FontSize="12"/>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="OptionsButton" Content="OPTIONS" Click="OptionsButton_Click"
+                            Background="Transparent" BorderBrush="#3A4352" BorderThickness="1"
+                            Padding="12,6" FontSize="11" FontWeight="SemiBold"/>
+                    <TextBlock x:Name="LauncherVersionText" Margin="12,0,0,0" VerticalAlignment="Center"
+                               Foreground="{StaticResource MutedTextBrush}" FontSize="12"/>
+                </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Center">
                     <Ellipse x:Name="ServerStatusDot" Width="9" Height="9" Margin="0,0,8,0" Fill="#788397"/>
                     <TextBlock x:Name="ServerStatusText" Text="Checking server..." FontSize="12" FontWeight="SemiBold" Foreground="#C7CFDC" VerticalAlignment="Center"/>
