@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Text;
 using System.Text.Encodings.Web;
+using System.Runtime.InteropServices;
 using Microsoft.Web.WebView2.Core;
 using System.Windows;
 using System.Windows.Controls;
@@ -22,24 +23,71 @@ public partial class MainWindow : Window
     private readonly NewsFeedService _newsFeedService = new();
     private readonly ServerStatusService _serverStatusService = new();
     private readonly EventStatusService _eventStatusService = new();
+    private readonly PlayerDashboardService _playerDashboardService = new();
     private readonly GameLauncherService _gameLauncherService = new();
     private readonly GamePathService _gamePathService = new();
     private readonly UpdateService _updateService = new();
     private readonly PortalService _portalService = new();
     private readonly SavedLoginService _savedLoginService = new();
     private readonly SettingsService _settingsService = new();
+    private readonly DiscordRichPresenceService _discordPresenceService = new();
     private readonly DispatcherTimer _serverStatusTimer;
     private readonly DispatcherTimer _eventStatusTimer;
+    private readonly DispatcherTimer _dashboardTimer;
+    private readonly DispatcherTimer _gameProcessTimer;
+    private PlayerDashboardResponse? _dashboard;
+    private DashboardNotice? _activeNotice;
+    private int _activeDashboardTab; // 0=news, 1=goals, 2=account
+    private bool _updatingPreviewCombo;
+    private bool _pendingRewardsPopupShown;
+    private bool _pendingRewardsPopupQueued;
+    private bool _gameWasRunning;
+    private DateTime _gameLaunchTimeUtc = DateTime.MinValue;
+    private bool _gameWindowSeen;
+    private int? _launchedGameProcessId;
+    private bool _serverOnline;
+    private string? _activeEventName;
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetWindowTextLength(IntPtr hWnd);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int maxCount);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetWindowRect(IntPtr hWnd, out NativeRect rect);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
     private List<NewsPost> _posts = [];
     private int _currentPostIndex;
 
     public MainWindow(LauncherSettings settings, string email, string password, LoginResponse account)
     {
+        // Assign constructor dependencies before InitializeComponent(). The preview
+        // ComboBox raises SelectionChanged while XAML is being created, so these
+        // fields must already be available when that handler runs.
+        _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+        _currentEmail = email ?? string.Empty;
+        _currentPassword = password ?? string.Empty;
+        _account = account ?? throw new ArgumentNullException(nameof(account));
+
         InitializeComponent();
-        _settings = settings;
-        _currentEmail = email;
-        _currentPassword = password;
-        _account = account;
 
         LauncherVersionText.Text = $"Launcher v{GetLauncherVersion()}";
         PlayerNameText.Text = string.IsNullOrWhiteSpace(account.PlayerName) ? email : account.PlayerName;
@@ -49,12 +97,19 @@ public partial class MainWindow : Window
         _serverStatusTimer.Tick += async (_, _) => await RefreshServerStatusAsync();
         _eventStatusTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
         _eventStatusTimer.Tick += async (_, _) => await RefreshEventStatusAsync();
+        _dashboardTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+        _dashboardTimer.Tick += async (_, _) => await RefreshDashboardAsync();
+        _gameProcessTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+        _gameProcessTimer.Tick += (_, _) => RefreshGameProcessState();
 
         Loaded += MainWindow_Loaded;
         Closed += (_, _) =>
         {
             _serverStatusTimer.Stop();
             _eventStatusTimer.Stop();
+            _dashboardTimer.Stop();
+            _gameProcessTimer.Stop();
+            _discordPresenceService.Dispose();
         };
     }
 
@@ -62,9 +117,13 @@ public partial class MainWindow : Window
     {
         UpdateGameDetectionUi();
         await InitializeNewsWebViewAsync();
-        await Task.WhenAll(LoadNewsAsync(), RefreshServerStatusAsync(), RefreshEventStatusAsync());
+        _discordPresenceService.SetEnabled(_settings.EnableDiscordRichPresence);
+        await Task.WhenAll(LoadNewsAsync(), RefreshServerStatusAsync(), RefreshEventStatusAsync(), RefreshDashboardAsync());
+        UpdateDiscordPresence();
         _serverStatusTimer.Start();
         _eventStatusTimer.Start();
+        _dashboardTimer.Start();
+        _gameProcessTimer.Start();
         _ = CheckForLauncherUpdateAsync();
     }
 
@@ -76,6 +135,8 @@ public partial class MainWindow : Window
         };
 
         optionsWindow.ShowDialog();
+        _discordPresenceService.SetEnabled(_settings.EnableDiscordRichPresence);
+        UpdateDiscordPresence();
         FooterText.Text = "Options saved.";
     }
 
@@ -110,6 +171,8 @@ public partial class MainWindow : Window
             ServerStatusDot.Fill = new SolidColorBrush(Color.FromRgb(224, 82, 82));
             ServerStatusText.Text = "Server Offline";
             ServerStatusText.Foreground = new SolidColorBrush(Color.FromRgb(224, 128, 128));
+            _serverOnline = false;
+            UpdateDiscordPresence();
             return;
         }
 
@@ -117,6 +180,8 @@ public partial class MainWindow : Window
         ServerStatusDot.Fill = new SolidColorBrush(Color.FromRgb(71, 190, 104));
         ServerStatusText.Text = players == 1 ? "Server Online • 1 Player" : $"Server Online • {players} Players";
         ServerStatusText.Foreground = new SolidColorBrush(Color.FromRgb(153, 220, 171));
+        _serverOnline = true;
+        UpdateDiscordPresence();
     }
 
 
@@ -135,6 +200,8 @@ public partial class MainWindow : Window
                 TextWrapping = TextWrapping.Wrap
             });
             EventsUpdatedText.Text = "Unavailable";
+            _activeEventName = null;
+            UpdateDiscordPresence();
             return;
         }
 
@@ -149,6 +216,8 @@ public partial class MainWindow : Window
                 TextWrapping = TextWrapping.Wrap
             });
             EventsUpdatedText.Text = "NONE ACTIVE";
+            _activeEventName = null;
+            UpdateDiscordPresence();
             return;
         }
 
@@ -156,6 +225,8 @@ public partial class MainWindow : Window
             ActiveEventsPanel.Children.Add(CreateEventCard(liveEvent));
 
         EventsUpdatedText.Text = events.Count == 1 ? "1 ACTIVE" : $"{events.Count} ACTIVE";
+        _activeEventName = events[0].Name;
+        UpdateDiscordPresence();
     }
 
     private static Border CreateEventCard(LiveEvent liveEvent)
@@ -381,6 +452,533 @@ body { overflow-x: hidden; padding-right: 12px; }
         OpenUrl(_posts[_currentPostIndex].Url);
     }
 
+
+    private async Task RefreshDashboardAsync()
+    {
+        PlayerDashboardResponse response = await _playerDashboardService.GetAsync(_settings, _currentEmail, _currentPassword);
+        if (!response.Success)
+        {
+            if (_activeDashboardTab == 1)
+            {
+                GoalTitleText.Text = "Dashboard unavailable";
+                GoalDescriptionText.Text = string.IsNullOrWhiteSpace(response.Error) ? "Unable to load Community Goals." : response.Error;
+            }
+            return;
+        }
+
+        _dashboard = response;
+        ApplyDashboardNotice(response.Notice);
+        RenderCommunityGoal(response.CommunityGoal);
+        RenderAccountDashboard(response);
+        QueuePendingRewardsPopup(response);
+        if (_activeDashboardTab == 1)
+            NewsStatusText.Text = "Community Dashboard refreshes automatically every 30 seconds";
+        else if (_activeDashboardTab == 2)
+            NewsStatusText.Text = "Account Dashboard refreshes automatically every 30 seconds";
+    }
+
+    private void QueuePendingRewardsPopup(PlayerDashboardResponse response)
+    {
+        if (_pendingRewardsPopupShown || _pendingRewardsPopupQueued)
+            return;
+
+        List<CommunityGoalRewardClaimDashboard> pendingClaims = (response.RewardClaims ?? [])
+            .Where(claim => claim != null && string.Equals(claim.Status, "Pending", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (pendingClaims.Count == 0)
+            return;
+
+        _pendingRewardsPopupQueued = true;
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            _pendingRewardsPopupQueued = false;
+            if (_pendingRewardsPopupShown || !IsLoaded)
+                return;
+
+            _pendingRewardsPopupShown = true;
+            var popup = new PendingRewardsWindow(pendingClaims)
+            {
+                Owner = this
+            };
+            popup.ShowDialog();
+        }), DispatcherPriority.ApplicationIdle);
+    }
+
+    private void ApplyDashboardNotice(DashboardNotice? notice)
+    {
+        _activeNotice = notice;
+        if (notice == null || string.IsNullOrWhiteSpace(notice.Message))
+        {
+            NoticeBanner.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        Color accent = notice.Severity.ToLowerInvariant() switch
+        {
+            "critical" => Color.FromRgb(239, 68, 68),
+            "warning" => Color.FromRgb(250, 204, 21),
+            _ => Color.FromRgb(56, 189, 248)
+        };
+        NoticeBanner.BorderBrush = new SolidColorBrush(accent);
+        NoticeTitleText.Foreground = new SolidColorBrush(accent);
+        NoticeTitleText.Text = notice.Title;
+        NoticeMessageText.Text = notice.Message;
+        NoticeActionButton.Visibility = string.IsNullOrWhiteSpace(notice.Url) ? Visibility.Collapsed : Visibility.Visible;
+        NoticeBanner.Visibility = Visibility.Visible;
+    }
+
+    private void RenderCommunityGoal(CommunityGoalDashboard? goal)
+    {
+        CommunityRewardsPanel.Children.Clear();
+        RankRewardsPanel.Children.Clear();
+        ContributorsPanel.Children.Clear();
+
+        if (goal == null)
+        {
+            GoalTitleText.Text = "No active Community Goal";
+            GoalDescriptionText.Text = "There is no server-wide goal running right now. Check back later for the next community objective.";
+            GoalProgressText.Text = "0 / 0";
+            GoalPercentText.Text = "0.0%";
+            GoalProgressBar.Value = 0;
+            GoalEndsText.Text = "Not active";
+            GoalPlayerContributionText.Text = "No active goal";
+            CommunityRewardsPanel.Children.Add(CreateMutedText("No rewards are currently configured."));
+            RankRewardsPanel.Children.Add(CreateMutedText("No contributor rewards are currently configured."));
+            ContributorsPanel.Children.Add(CreateMutedText("No contributors yet."));
+            return;
+        }
+
+        GoalTitleText.Text = goal.Name;
+        GoalDescriptionText.Text = goal.Description;
+        GoalProgressText.Text = $"{goal.CurrentCount:N0} / {goal.TargetCount:N0}";
+        GoalPercentText.Text = $"{goal.Percent:0.0}%";
+        GoalProgressBar.Value = Math.Clamp(goal.Percent, 0, 100);
+        GoalEndsText.Text = goal.EndTimeUtc > 0
+            ? DateTimeOffset.FromUnixTimeSeconds(goal.EndTimeUtc).ToLocalTime().ToString("ddd, MMM d • h:mm tt")
+            : "Not set";
+        GoalPlayerContributionText.Text = goal.PlayerRank > 0
+            ? $"{goal.PlayerContribution:N0} • Rank #{goal.PlayerRank}"
+            : goal.PlayerContribution > 0 ? $"{goal.PlayerContribution:N0} contributed" : "No contribution yet";
+
+        AddRewardItems(CommunityRewardsPanel, goal.CommunityReward, Color.FromRgb(34, 211, 238));
+        if (CommunityRewardsPanel.Children.Count == 0)
+            CommunityRewardsPanel.Children.Add(CreateMutedText("No community reward configured."));
+
+        foreach (DashboardRankReward rankReward in goal.RankRewards)
+        {
+            Color accent = rankReward.RankStart switch
+            {
+                1 => Color.FromRgb(250, 204, 21),
+                2 => Color.FromRgb(192, 132, 252),
+                _ => Color.FromRgb(34, 211, 238)
+            };
+            string label = rankReward.RankStart == rankReward.RankEnd
+                ? $"#{rankReward.RankStart} CONTRIBUTOR"
+                : $"#{rankReward.RankStart}–#{rankReward.RankEnd} CONTRIBUTORS";
+            RankRewardsPanel.Children.Add(CreateRankRewardCard(label, rankReward.Reward, accent));
+        }
+        if (RankRewardsPanel.Children.Count == 0)
+            RankRewardsPanel.Children.Add(CreateMutedText("No contributor rewards configured."));
+
+        foreach (DashboardContributor contributor in goal.TopContributors)
+            ContributorsPanel.Children.Add(CreateContributorRow(contributor));
+        if (ContributorsPanel.Children.Count == 0)
+            ContributorsPanel.Children.Add(CreateMutedText("No contributors yet."));
+    }
+
+    private static TextBlock CreateMutedText(string text) => new()
+    {
+        Text = text,
+        Foreground = new SolidColorBrush(Color.FromRgb(138, 149, 168)),
+        TextWrapping = TextWrapping.Wrap,
+        Margin = new Thickness(0, 4, 0, 4)
+    };
+
+    private static void AddRewardItems(Panel panel, DashboardReward reward, Color accent)
+    {
+        if (reward.G > 0)
+            panel.Children.Add(CreateRewardChip("CURRENCY", $"{reward.G:N0} G", Color.FromRgb(250, 204, 21)));
+        foreach (DashboardRewardItem item in reward.Items)
+        {
+            Color itemAccent = item.Category.Equals("Costumes", StringComparison.OrdinalIgnoreCase)
+                ? Color.FromRgb(244, 114, 182)
+                : accent;
+            panel.Children.Add(CreateRewardChip(item.Category.ToUpperInvariant(), item.Name, itemAccent));
+        }
+    }
+
+    private static Border CreateRewardChip(string category, string name, Color accent)
+    {
+        StackPanel stack = new();
+        stack.Children.Add(new TextBlock { Text = category, Foreground = new SolidColorBrush(accent), FontSize = 8, FontWeight = FontWeights.Bold });
+        stack.Children.Add(new TextBlock { Text = name, Foreground = Brushes.White, FontSize = 11, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, MaxWidth = 220 });
+        return new Border
+        {
+            Background = new SolidColorBrush(Color.FromRgb(16, 22, 30)),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(130, accent.R, accent.G, accent.B)),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(6),
+            Padding = new Thickness(10, 7, 10, 7),
+            Margin = new Thickness(0, 0, 8, 8),
+            Child = stack
+        };
+    }
+
+    private static Border CreateRankRewardCard(string label, DashboardReward reward, Color accent)
+    {
+        WrapPanel items = new();
+        AddRewardItems(items, reward, accent);
+        StackPanel content = new();
+        content.Children.Add(new TextBlock { Text = label, Foreground = new SolidColorBrush(accent), FontSize = 10, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 7) });
+        content.Children.Add(items);
+        return new Border
+        {
+            Width = 245,
+            MinHeight = 92,
+            Background = new SolidColorBrush(Color.FromRgb(17, 22, 30)),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(145, accent.R, accent.G, accent.B)),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(6),
+            Padding = new Thickness(12),
+            Margin = new Thickness(0, 0, 10, 10),
+            Child = content
+        };
+    }
+
+    private static Border CreateContributorRow(DashboardContributor contributor)
+    {
+        Color accent = contributor.Rank switch
+        {
+            1 => Color.FromRgb(250, 204, 21),
+            2 or 3 => Color.FromRgb(192, 132, 252),
+            _ => Color.FromRgb(34, 211, 238)
+        };
+        Grid grid = new();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.Children.Add(new TextBlock { Text = $"#{contributor.Rank}", Foreground = new SolidColorBrush(accent), FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 7, 0) });
+        TextBlock name = new() { Text = contributor.PlayerName, Foreground = new SolidColorBrush(accent), FontWeight = FontWeights.SemiBold };
+        Grid.SetColumn(name, 1); grid.Children.Add(name);
+        TextBlock count = new() { Text = contributor.ContributionCount.ToString("N0"), Foreground = Brushes.White, FontWeight = FontWeights.Bold };
+        Grid.SetColumn(count, 2); grid.Children.Add(count);
+        return new Border { Background = new SolidColorBrush(Color.FromRgb(17, 22, 30)), CornerRadius = new CornerRadius(5), Padding = new Thickness(10, 7, 10, 7), Margin = new Thickness(0, 0, 0, 6), Child = grid };
+    }
+
+    private void NewsTabButton_Click(object sender, RoutedEventArgs e) => ShowDashboardTab(0);
+    private void GoalsTabButton_Click(object sender, RoutedEventArgs e) => ShowDashboardTab(1);
+    private void AccountTabButton_Click(object sender, RoutedEventArgs e) => ShowDashboardTab(2);
+
+    private void ShowDashboardTab(int tab)
+    {
+        _activeDashboardTab = tab;
+        NewsPanel.Visibility = tab == 0 ? Visibility.Visible : Visibility.Collapsed;
+        GoalsPanel.Visibility = tab == 1 ? Visibility.Visible : Visibility.Collapsed;
+        AccountPanel.Visibility = tab == 2 ? Visibility.Visible : Visibility.Collapsed;
+        Color active = Color.FromRgb(20, 139, 235);
+        Color inactive = Color.FromRgb(48, 55, 68);
+        NewsTabButton.Background = new SolidColorBrush(tab == 0 ? active : inactive);
+        GoalsTabButton.Background = new SolidColorBrush(tab == 1 ? active : inactive);
+        AccountTabButton.Background = new SolidColorBrush(tab == 2 ? active : inactive);
+        RefreshContentButton.Content = tab switch
+        {
+            0 => "REFRESH NEWS",
+            1 => "REFRESH GOAL",
+            2 => "REFRESH ACCOUNT",
+            _ => "REFRESH"
+        };
+        NewsStatusText.Text = tab switch
+        {
+            0 => _posts.Count > 1
+                ? $"Showing the latest {_posts.Count} website articles — use the arrows to browse"
+                : "Showing the latest website article",
+            1 => "Community Dashboard refreshes automatically every 30 seconds",
+            2 => "Account Dashboard refreshes automatically every 30 seconds",
+            _ => string.Empty
+        };
+    }
+
+    private async void RefreshContentButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_activeDashboardTab == 0)
+            await LoadNewsAsync();
+        else
+            await RefreshDashboardAsync();
+    }
+
+    private void NoticeActionButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_activeNotice is not null) OpenUrl(_activeNotice.Url);
+    }
+
+    private void OpenCommunityGoalsButton_Click(object sender, RoutedEventArgs e)
+    {
+        OpenUrl(!string.IsNullOrWhiteSpace(_dashboard?.CommunityGoalsUrl) ? _dashboard.CommunityGoalsUrl : _settings.CommunityGoalsUrl);
+    }
+
+
+    private void RenderAccountDashboard(PlayerDashboardResponse response)
+    {
+        AccountDashboard account = response.Account ?? new AccountDashboard();
+        AccountPlayerNameText.Text = string.IsNullOrWhiteSpace(account.PlayerName) ? _account.PlayerName : account.PlayerName;
+        AccountEmailText.Text = string.IsNullOrWhiteSpace(account.EmailAddress) ? _currentEmail : account.EmailAddress;
+        AccountRankStatusText.Text = $"{account.Rank} • {account.Status}";
+        AccountTwoFactorText.Text = account.TwoFactorAvailable
+            ? $"Two-Factor Authentication: {(account.TwoFactorEnabled ? "Enabled" : "Not Enabled")}" 
+            : $"Two-Factor Authentication: {account.TwoFactorStatus}";
+        AccountTwoFactorText.Foreground = new SolidColorBrush(account.TwoFactorEnabled ? Color.FromRgb(117, 230, 173) : Color.FromRgb(250, 204, 21));
+        string recoveryLabel = !account.RecoveryEmailSet ? "Not Set" : account.RecoveryEmailVerified ? "Verified" : "Pending Verification";
+        AccountRecoveryText.Text = $"Recovery Email: {recoveryLabel}" + (string.IsNullOrWhiteSpace(account.RecoveryEmailMasked) ? "" : $" • {account.RecoveryEmailMasked}");
+        AccountRecoveryText.Foreground = new SolidColorBrush(account.RecoveryEmailVerified ? Color.FromRgb(117, 230, 173) : Color.FromRgb(250, 204, 21));
+
+        AccountRewardClaimsPanel.Children.Clear();
+        foreach (CommunityGoalRewardClaimDashboard claim in response.RewardClaims)
+            AccountRewardClaimsPanel.Children.Add(CreateRewardClaimCard(claim));
+        if (AccountRewardClaimsPanel.Children.Count == 0)
+            AccountRewardClaimsPanel.Children.Add(CreateMutedText("No pending or recently delivered Community Goal rewards."));
+
+        AccountGoalHistoryPanel.Children.Clear();
+        foreach (CommunityGoalHistoryDashboard goal in response.CommunityGoalHistory)
+            AccountGoalHistoryPanel.Children.Add(CreateGoalHistoryRow(goal));
+        if (AccountGoalHistoryPanel.Children.Count == 0)
+            AccountGoalHistoryPanel.Children.Add(CreateMutedText("No completed Community Goals are available yet."));
+
+        PreviewModeBorder.Visibility = account.IsAdministrator && account.PreviewEnabled ? Visibility.Visible : Visibility.Collapsed;
+        if (PreviewModeBorder.Visibility == Visibility.Visible)
+        {
+            _updatingPreviewCombo = true;
+            foreach (object item in DashboardPreviewCombo.Items)
+            {
+                if (item is ComboBoxItem combo && string.Equals(combo.Tag?.ToString(), response.PreviewMode, StringComparison.OrdinalIgnoreCase))
+                {
+                    DashboardPreviewCombo.SelectedItem = combo;
+                    break;
+                }
+            }
+            _updatingPreviewCombo = false;
+        }
+    }
+
+    private static Border CreateRewardClaimCard(CommunityGoalRewardClaimDashboard claim)
+    {
+        bool pending = claim.Status.Equals("Pending", StringComparison.OrdinalIgnoreCase);
+        Color accent = pending ? Color.FromRgb(250, 204, 21) : Color.FromRgb(117, 230, 173);
+        WrapPanel rewards = new();
+        AddRewardItems(rewards, claim.Reward, accent);
+        StackPanel content = new();
+        content.Children.Add(new TextBlock { Text = $"{claim.GoalName} • {claim.RewardSource}", FontWeight = FontWeights.Bold, FontSize = 14 });
+        content.Children.Add(new TextBlock
+        {
+            Text = pending ? "PENDING — Enter the game to receive this reward." : "DELIVERED",
+            Foreground = new SolidColorBrush(accent), FontWeight = FontWeights.Bold, FontSize = 10, Margin = new Thickness(0, 4, 0, 8)
+        });
+        content.Children.Add(rewards);
+        return new Border { Background = new SolidColorBrush(Color.FromRgb(17, 22, 30)), BorderBrush = new SolidColorBrush(accent), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(13), Margin = new Thickness(0, 0, 0, 8), Child = content };
+    }
+
+    private static Border CreateGoalHistoryRow(CommunityGoalHistoryDashboard goal)
+    {
+        Grid grid = new();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        StackPanel left = new();
+        left.Children.Add(new TextBlock { Text = goal.Name, FontWeight = FontWeights.Bold });
+        string detail = $"{goal.FinalCount:N0} / {goal.TargetCount:N0}";
+        if (goal.PlayerContribution > 0) detail += $" • You: {goal.PlayerContribution:N0}";
+        if (goal.PlayerRank > 0) detail += $" • Rank #{goal.PlayerRank}";
+        left.Children.Add(new TextBlock { Text = detail, Foreground = new SolidColorBrush(Color.FromRgb(170, 180, 197)), FontSize = 11, Margin = new Thickness(0, 3, 0, 0) });
+        grid.Children.Add(left);
+        TextBlock status = new() { Text = goal.Status.ToUpperInvariant(), Foreground = new SolidColorBrush(Color.FromRgb(117, 230, 173)), FontSize = 10, FontWeight = FontWeights.Bold, VerticalAlignment = VerticalAlignment.Center };
+        Grid.SetColumn(status, 1); grid.Children.Add(status);
+        return new Border { Background = new SolidColorBrush(Color.FromRgb(17, 22, 30)), CornerRadius = new CornerRadius(6), Padding = new Thickness(12, 9, 12, 9), Margin = new Thickness(0, 0, 0, 7), Child = grid };
+    }
+
+    private async void DashboardPreviewCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        // SelectionChanged fires once while InitializeComponent builds the ComboBox.
+        // Ignore that initialization event; only react after the window is loaded.
+        if (!IsLoaded || _updatingPreviewCombo || sender is not ComboBox comboBox ||
+            comboBox.SelectedItem is not ComboBoxItem item)
+        {
+            return;
+        }
+
+        _settings.DashboardPreviewMode = item.Tag?.ToString() ?? "live";
+        _settingsService.Save(_settings);
+        await RefreshDashboardAsync();
+    }
+
+    private async void OpenAccountPortalButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            PortalTokenResponse result = await _portalService.CreatePortalLoginAsync(_settings, _currentEmail, _currentPassword);
+            if (result.Success && !string.IsNullOrWhiteSpace(result.Url)) OpenUrl(result.Url);
+            else FooterText.Text = string.IsNullOrWhiteSpace(result.Error) ? "Unable to open Account Portal." : result.Error;
+        }
+        catch (Exception ex)
+        {
+            FooterText.Text = $"Unable to open Account Portal: {ex.Message}";
+        }
+    }
+
+    private void RefreshGameProcessState()
+    {
+        bool running = IsGameRunning();
+        if (running)
+        {
+            PlayButton.Content = "GAME RUNNING";
+            PlayButton.IsEnabled = false;
+            GameFoundText.Text = "Game Running";
+            UpdateDiscordPresence(gameRunningOverride: true);
+        }
+        else
+        {
+            if (_gameWasRunning && _settings.RestoreAfterGameExit && WindowState == WindowState.Minimized)
+            {
+                WindowState = WindowState.Normal;
+                Activate();
+            }
+
+            _gameWasRunning = false;
+            _gameLaunchTimeUtc = DateTime.MinValue;
+            _gameWindowSeen = false;
+            _launchedGameProcessId = null;
+
+            // Explicitly restore every game-state UI value. UpdateGameDetectionUi()
+            // previously re-enabled the button but left its old GAME RUNNING label behind.
+            UpdateGameDetectionUi();
+            UpdateDiscordPresence(gameRunningOverride: false);
+        }
+    }
+
+    private void UpdateDiscordPresence(bool? gameRunningOverride = null)
+    {
+        bool gameRunning = gameRunningOverride ?? _gameWasRunning;
+        _discordPresenceService.Update(gameRunning, _serverOnline, _activeEventName);
+    }
+
+    private bool IsGameRunning()
+    {
+        string? gamePath = _gamePathService.GameExecutablePath;
+        if (string.IsNullOrWhiteSpace(gamePath))
+            return false;
+
+        string expectedPath;
+        try
+        {
+            expectedPath = Path.GetFullPath(gamePath);
+        }
+        catch
+        {
+            return false;
+        }
+
+        bool startupGracePeriod = _gameLaunchTimeUtc != DateTime.MinValue
+            && DateTime.UtcNow - _gameLaunchTimeUtc < TimeSpan.FromSeconds(45);
+
+        // The executable initially started by the launcher may hand the actual game
+        // window to another process. Scan every matching executable and look for a
+        // real, user-visible game window instead of trusting the original PID.
+        string processName = Path.GetFileNameWithoutExtension(expectedPath);
+        bool matchingProcessExists = false;
+
+        try
+        {
+            foreach (Process process in Process.GetProcessesByName(processName))
+            {
+                using (process)
+                {
+                    process.Refresh();
+                    if (process.HasExited)
+                        continue;
+
+                    string? processPath = null;
+                    try
+                    {
+                        processPath = process.MainModule?.FileName;
+                    }
+                    catch
+                    {
+                        // If Windows denies MainModule access, only trust the exact PID
+                        // created by this launcher session.
+                        if (_launchedGameProcessId != process.Id)
+                            continue;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(processPath))
+                    {
+                        string fullProcessPath;
+                        try
+                        {
+                            fullProcessPath = Path.GetFullPath(processPath);
+                        }
+                        catch
+                        {
+                            continue;
+                        }
+
+                        if (!string.Equals(fullProcessPath, expectedPath, StringComparison.OrdinalIgnoreCase))
+                            continue;
+                    }
+
+                    matchingProcessExists = true;
+
+                    if (IsUsableGameWindow(process.MainWindowHandle))
+                    {
+                        _gameWindowSeen = true;
+                        return true;
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Fall through to the session-state checks below.
+        }
+
+        // Once a real Marvel Heroes window has appeared, its disappearance means the
+        // playable session is over. Ignore any headless process left behind afterward.
+        if (_gameWindowSeen)
+            return false;
+
+        // During startup, keep the button locked while the game creates its real window.
+        if (startupGracePeriod && matchingProcessExists)
+            return true;
+
+        return false;
+    }
+
+    private static bool IsUsableGameWindow(IntPtr handle)
+    {
+        if (handle == IntPtr.Zero || !IsWindowVisible(handle))
+            return false;
+
+        // A minimized game is still running even though Windows moves its rectangle
+        // off-screen, so accept iconic windows before checking dimensions.
+        if (IsIconic(handle))
+            return true;
+
+        int titleLength = GetWindowTextLength(handle);
+        if (titleLength <= 0)
+            return false;
+
+        var title = new StringBuilder(titleLength + 1);
+        _ = GetWindowText(handle, title, title.Capacity);
+        if (string.IsNullOrWhiteSpace(title.ToString()))
+            return false;
+
+        if (!GetWindowRect(handle, out NativeRect rect))
+            return false;
+
+        int width = Math.Abs(rect.Right - rect.Left);
+        int height = Math.Abs(rect.Bottom - rect.Top);
+
+        // Reject tiny or hidden helper windows that can linger after the game closes.
+        return width >= 320 && height >= 240;
+    }
+
     private void AccountButton_Click(object sender, RoutedEventArgs e) => AccountPopup.IsOpen = !AccountPopup.IsOpen;
 
     private async void AccountPortalButton_Click(object sender, RoutedEventArgs e)
@@ -418,8 +1016,15 @@ body { overflow-x: hidden; padding-right: 12px; }
 
         try
         {
-            _gameLauncherService.Launch(_gamePathService.GameExecutablePath, _settings, _currentEmail, _currentPassword);
-            Close();
+            _gameLaunchTimeUtc = DateTime.UtcNow;
+            _gameWindowSeen = false;
+            Process launchedProcess = _gameLauncherService.Launch(_gamePathService.GameExecutablePath, _settings, _currentEmail, _currentPassword);
+            _launchedGameProcessId = launchedProcess.Id;
+            launchedProcess.Dispose();
+            _gameWasRunning = true;
+            RefreshGameProcessState();
+            if (_settings.MinimizeAfterLaunch)
+                WindowState = WindowState.Minimized;
         }
         catch (Exception ex)
         {
@@ -434,6 +1039,7 @@ body { overflow-x: hidden; padding-right: 12px; }
         GameFoundText.Text = found ? "Game Ready" : "Game Not Found";
         GamePlacementText.Text = "Place MHRebornLauncher.exe and MHRebornLauncher.Updater.exe together in the root Marvel Heroes folder, directly beside the UnrealEngine3 folder.";
         GamePlacementText.Visibility = found ? Visibility.Collapsed : Visibility.Visible;
+        PlayButton.Content = "PLAY";
         PlayButton.IsEnabled = found;
     }
 
@@ -475,4 +1081,36 @@ body { overflow-x: hidden; padding-right: 12px; }
             ?? Assembly.GetExecutingAssembly().GetName().Version?.ToString();
         return (version ?? "Unknown").Split('+')[0].Trim();
     }
+
+    private void TitleBar_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != System.Windows.Input.MouseButton.Left || IsInsideButton(e.OriginalSource as DependencyObject))
+            return;
+
+        if (e.ClickCount == 2 && ResizeMode != ResizeMode.NoResize)
+            WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+        else
+            DragMove();
+    }
+
+    private static bool IsInsideButton(DependencyObject? source)
+    {
+        while (source is not null)
+        {
+            if (source is Button)
+                return true;
+            source = VisualTreeHelper.GetParent(source);
+        }
+        return false;
+    }
+
+    private void MinimizeWindowButton_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
+    private void MaximizeWindowButton_Click(object sender, RoutedEventArgs e) => WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+    private void CloseWindowButton_Click(object sender, RoutedEventArgs e) => Close();
+    private void Window_StateChanged(object? sender, EventArgs e)
+    {
+        if (MaximizeWindowButton is not null)
+            MaximizeWindowButton.Content = WindowState == WindowState.Maximized ? "❐" : "□";
+    }
+
 }

@@ -5,47 +5,63 @@
         Width="410" Height="650"
         ResizeMode="NoResize"
         WindowStartupLocation="CenterScreen"
+        WindowStyle="None"
         Background="#11141C">
-    <Grid Margin="30,22,30,24">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
+    <Border BorderBrush="#343A49" BorderThickness="1" CornerRadius="7" Background="#11141C" ClipToBounds="True">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="34"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
 
-        <StackPanel HorizontalAlignment="Center" Margin="0,0,0,18">
-            <Image Source="pack://application:,,,/MHRebornLauncher;component/Assets/OmegaNodeLogo.png" Width="150" Height="150" Stretch="Uniform"/>
-            <TextBlock Text="MARVEL HEROES REBORN" FontSize="26" FontWeight="Bold" HorizontalAlignment="Stretch" TextAlignment="Center" Margin="0,4,0,0"/>
-            <TextBlock Text="Use your @omeganode.org account to continue" Foreground="{StaticResource MutedTextBrush}" FontSize="13" HorizontalAlignment="Center" Margin="0,5,0,0"/>
-        </StackPanel>
+            <Border Grid.Row="0" Background="#12161E" BorderBrush="#303642" BorderThickness="0,0,0,1" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+                <Grid>
+                    <TextBlock Text="Sign In" Margin="12,0,0,0" VerticalAlignment="Center" Foreground="#C7CFDC" FontSize="11"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button Content="—" Width="44" Height="33" Padding="0" Background="Transparent" BorderThickness="0" Click="MinimizeWindowButton_Click"/>
+                        <Button Content="✕" Width="44" Height="33" Padding="0" Background="Transparent" BorderThickness="0" Click="CloseWindowButton_Click"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
 
-        <StackPanel Grid.Row="1">
-            <TextBlock Text="GAME ACCOUNT" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource MutedTextBrush}" Margin="0,0,0,7"/>
-            <TextBox x:Name="EmailTextBox" Height="44" FontSize="14" VerticalContentAlignment="Center"/>
+            <Grid Grid.Row="1" Margin="30,18,30,24">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
 
-            <TextBlock Text="PASSWORD" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource MutedTextBrush}" Margin="0,16,0,7"/>
-            <PasswordBox x:Name="PasswordBox" Height="44" FontSize="14" VerticalContentAlignment="Center" KeyDown="PasswordBox_KeyDown"/>
+                <StackPanel HorizontalAlignment="Center" Margin="0,0,0,18">
+                    <Image Source="pack://application:,,,/MHRebornLauncher;component/Assets/OmegaNodeLogo.png" Width="150" Height="150" Stretch="Uniform"/>
+                    <TextBlock Text="MARVEL HEROES REBORN" FontSize="24" FontWeight="Bold" HorizontalAlignment="Stretch" TextAlignment="Center" Margin="0,4,0,0"/>
+                    <TextBlock Text="Use your @omeganode.org account to continue" Foreground="{StaticResource MutedTextBrush}" FontSize="13" HorizontalAlignment="Center" Margin="0,5,0,0"/>
+                </StackPanel>
 
-            <DockPanel Margin="0,14,0,0">
-                <CheckBox x:Name="RememberMeCheckBox" Content="Keep me signed in" VerticalAlignment="Center"/>
-                <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right">
-                    <Hyperlink NavigateUri="https://play.omeganode.org/AccountPortal/forgot-password.php" RequestNavigate="ExternalLink_RequestNavigate">Forgot password?</Hyperlink>
-                </TextBlock>
-            </DockPanel>
+                <StackPanel Grid.Row="1">
+                    <TextBlock Text="GAME ACCOUNT" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource MutedTextBrush}" Margin="0,0,0,7"/>
+                    <TextBox x:Name="EmailTextBox" Height="44" FontSize="14" VerticalContentAlignment="Center"/>
+                    <TextBlock Text="PASSWORD" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource MutedTextBrush}" Margin="0,16,0,7"/>
+                    <PasswordBox x:Name="PasswordBox" Height="44" FontSize="14" VerticalContentAlignment="Center" KeyDown="PasswordBox_KeyDown"/>
+                    <DockPanel Margin="0,14,0,0">
+                        <CheckBox x:Name="RememberMeCheckBox" Content="Keep me signed in" VerticalAlignment="Center"/>
+                        <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right">
+                            <Hyperlink NavigateUri="https://play.omeganode.org/AccountPortal/forgot-password.php" RequestNavigate="ExternalLink_RequestNavigate">Forgot password?</Hyperlink>
+                        </TextBlock>
+                    </DockPanel>
+                    <Button x:Name="LoginButton" Content="CONTINUE" Height="46" Margin="0,22,0,0" FontSize="15" Click="LoginButton_Click"/>
+                    <TextBlock x:Name="LoginErrorText" Foreground="{StaticResource DangerBrush}" TextWrapping="Wrap" TextAlignment="Center" Margin="0,10,0,0"/>
+                    <Grid Margin="0,20,0,0">
+                        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                        <Border Height="1" Background="#343A49" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="1" FontSize="11" Margin="12,0" HorizontalAlignment="Center">
+                            <Hyperlink NavigateUri="https://play.omeganode.org/Dashboard/" RequestNavigate="ExternalLink_RequestNavigate">NEW PLAYER? CREATE AN ACCOUNT</Hyperlink>
+                        </TextBlock>
+                        <Border Grid.Column="2" Height="1" Background="#343A49" VerticalAlignment="Center"/>
+                    </Grid>
+                </StackPanel>
 
-            <Button x:Name="LoginButton" Content="CONTINUE" Height="46" Margin="0,22,0,0" FontSize="15" Click="LoginButton_Click"/>
-            <TextBlock x:Name="LoginErrorText" Foreground="{StaticResource DangerBrush}" TextWrapping="Wrap" TextAlignment="Center" Margin="0,10,0,0"/>
-
-            <Grid Margin="0,20,0,0">
-                <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/><ColumnDefinition/></Grid.ColumnDefinitions>
-                <Border Height="1" Background="#343A49" VerticalAlignment="Center"/>
-                <TextBlock Grid.Column="1" FontSize="11" Margin="12,0" HorizontalAlignment="Center">
-                    <Hyperlink NavigateUri="https://play.omeganode.org/Dashboard/" RequestNavigate="ExternalLink_RequestNavigate">NEW PLAYER? CREATE AN ACCOUNT</Hyperlink>
-                </TextBlock>
-                <Border Grid.Column="2" Height="1" Background="#343A49" VerticalAlignment="Center"/>
+                <TextBlock Grid.Row="2" x:Name="VersionText" HorizontalAlignment="Center" Foreground="#737C90" FontSize="11" Margin="0,14,0,0"/>
             </Grid>
-        </StackPanel>
-
-        <TextBlock Grid.Row="2" x:Name="VersionText" HorizontalAlignment="Center" Foreground="#737C90" FontSize="11" Margin="0,14,0,0"/>
-    </Grid>
+        </Grid>
+    </Border>
 </Window>

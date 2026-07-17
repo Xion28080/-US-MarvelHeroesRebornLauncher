@@ -8,11 +8,11 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<AssemblyName>MHRebornLauncher</AssemblyName>
 		<RootNamespace>MHRebornLauncher</RootNamespace>
-		<ApplicationIcon>Assets\MHRebornLauncher.ico</ApplicationIcon>
+		<ApplicationIcon>Assets\OmegaNodeLogo.ico</ApplicationIcon>
 
-		<Version>1.1.1</Version>
-		<AssemblyVersion>1.1.1.0</AssemblyVersion>
-		<FileVersion>1.1.1.0</FileVersion>
+		<Version>1.2.0</Version>
+		<AssemblyVersion>1.2.0.0</AssemblyVersion>
+		<FileVersion>1.2.0.0</FileVersion>
 
 		<RuntimeIdentifier>win-x64</RuntimeIdentifier>
 		<SelfContained>true</SelfContained>
@@ -26,6 +26,7 @@
 
 	<ItemGroup>
 		<PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3405.78" />
+		<PackageReference Include="DiscordRichPresence" Version="1.6.1.70" />
 	</ItemGroup>
 
 	<ItemGroup>

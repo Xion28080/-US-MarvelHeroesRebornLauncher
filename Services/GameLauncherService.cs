@@ -11,7 +11,7 @@ public sealed class GameLauncherService
         return string.Join(' ', BuildArgumentArray(settings, emailAddress, password).Select(QuoteIfNeeded));
     }
 
-    public void Launch(string gameExecutablePath, LauncherSettings settings, string emailAddress, string password)
+    public Process Launch(string gameExecutablePath, LauncherSettings settings, string emailAddress, string password)
     {
         if (!File.Exists(gameExecutablePath))
             throw new FileNotFoundException("Marvel Heroes executable was not found.", gameExecutablePath);
@@ -28,7 +28,8 @@ public sealed class GameLauncherService
         foreach (string arg in args)
             startInfo.ArgumentList.Add(arg);
 
-        Process.Start(startInfo);
+        return Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Marvel Heroes did not start.");
     }
 
     private static string[] BuildArgumentArray(LauncherSettings settings, string emailAddress, string password)
