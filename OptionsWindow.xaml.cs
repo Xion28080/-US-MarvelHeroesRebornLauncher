@@ -28,19 +28,41 @@ public partial class OptionsWindow : Window
         MinimizeAfterLaunchCheckBox.IsChecked = settings.MinimizeAfterLaunch;
         RestoreAfterGameExitCheckBox.IsChecked = settings.RestoreAfterGameExit;
         DiscordRichPresenceCheckBox.IsChecked = settings.EnableDiscordRichPresence;
+        DmTaskbarFlashCheckBox.IsChecked = settings.EnableDmTaskbarFlash;
+        DmNotificationSoundCheckBox.IsChecked = settings.EnableDmNotificationSound;
+        DmNotificationVolumeSlider.Value = Math.Clamp(settings.DmNotificationVolumePercent, 0, 100);
     }
 
-    private void GeneralNavButton_Click(object sender, RoutedEventArgs e) => ShowSection(false);
-    private void SupportNavButton_Click(object sender, RoutedEventArgs e) => ShowSection(true);
-
-    private void ShowSection(bool support)
+    private enum OptionsSection
     {
-        GeneralPanel.Visibility = support ? Visibility.Collapsed : Visibility.Visible;
-        SupportPanel.Visibility = support ? Visibility.Visible : Visibility.Collapsed;
-        GeneralNavButton.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(support ? "#00000000" : "#243142"));
-        SupportNavButton.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(support ? "#243142" : "#00000000"));
-        GeneralNavButton.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(support ? "#00000000" : "#148BEB"));
-        SupportNavButton.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(support ? "#148BEB" : "#00000000"));
+        General,
+        Discord,
+        Notifications,
+        Support
+    }
+
+    private void GeneralNavButton_Click(object sender, RoutedEventArgs e) => ShowSection(OptionsSection.General);
+    private void DiscordNavButton_Click(object sender, RoutedEventArgs e) => ShowSection(OptionsSection.Discord);
+    private void NotificationsNavButton_Click(object sender, RoutedEventArgs e) => ShowSection(OptionsSection.Notifications);
+    private void SupportNavButton_Click(object sender, RoutedEventArgs e) => ShowSection(OptionsSection.Support);
+
+    private void ShowSection(OptionsSection section)
+    {
+        GeneralPanel.Visibility = section == OptionsSection.General ? Visibility.Visible : Visibility.Collapsed;
+        DiscordPanel.Visibility = section == OptionsSection.Discord ? Visibility.Visible : Visibility.Collapsed;
+        NotificationsPanel.Visibility = section == OptionsSection.Notifications ? Visibility.Visible : Visibility.Collapsed;
+        SupportPanel.Visibility = section == OptionsSection.Support ? Visibility.Visible : Visibility.Collapsed;
+
+        SetNavigationState(GeneralNavButton, section == OptionsSection.General);
+        SetNavigationState(DiscordNavButton, section == OptionsSection.Discord);
+        SetNavigationState(NotificationsNavButton, section == OptionsSection.Notifications);
+        SetNavigationState(SupportNavButton, section == OptionsSection.Support);
+    }
+
+    private static void SetNavigationState(Button button, bool selected)
+    {
+        button.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(selected ? "#243142" : "#00000000"));
+        button.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(selected ? "#148BEB" : "#00000000"));
     }
 
     private async void VerifyInstallationButton_Click(object sender, RoutedEventArgs e)
@@ -130,6 +152,9 @@ public partial class OptionsWindow : Window
         _settings.MinimizeAfterLaunch = MinimizeAfterLaunchCheckBox.IsChecked == true;
         _settings.RestoreAfterGameExit = RestoreAfterGameExitCheckBox.IsChecked == true;
         _settings.EnableDiscordRichPresence = DiscordRichPresenceCheckBox.IsChecked == true;
+        _settings.EnableDmTaskbarFlash = DmTaskbarFlashCheckBox.IsChecked == true;
+        _settings.EnableDmNotificationSound = DmNotificationSoundCheckBox.IsChecked == true;
+        _settings.DmNotificationVolumePercent = (int)Math.Round(DmNotificationVolumeSlider.Value);
         _settingsService.Save(_settings);
         DialogResult = true;
     }

@@ -7,7 +7,7 @@
         Width="1180" Height="760" MinWidth="980" MinHeight="650"
         WindowStartupLocation="CenterScreen" Background="#0D1017"
         WindowStyle="None" ResizeMode="CanResize"
-        StateChanged="Window_StateChanged">
+        StateChanged="Window_StateChanged" LocationChanged="Window_PositionChanged" SizeChanged="Window_SizeChanged">
     <shell:WindowChrome.WindowChrome>
         <shell:WindowChrome CaptionHeight="0"
                             ResizeBorderThickness="6"
@@ -128,15 +128,50 @@
                     <TextBlock x:Name="ServerStatusText" Text="Checking server..." FontSize="12" FontWeight="SemiBold" Foreground="#C7CFDC" VerticalAlignment="Center"/>
                 </StackPanel>
                 <Grid Grid.Column="2" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0">
-                    <Button x:Name="AccountButton" Background="Transparent" Padding="10,7" Click="AccountButton_Click">
-                        <StackPanel Orientation="Horizontal">
-                            <Border x:Name="RankBadgeBorder" CornerRadius="4" Padding="8,4" Background="#285B91" VerticalAlignment="Center">
-                                <TextBlock x:Name="RankBadgeText" Text="USER" FontSize="10" FontWeight="Bold"/>
-                            </Border>
-                            <TextBlock x:Name="PlayerNameText" FontSize="15" FontWeight="SemiBold" Margin="10,0,6,0" VerticalAlignment="Center"/>
-                            <TextBlock Text="⌄" FontSize="16" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center"/>
-                        </StackPanel>
-                    </Button>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button x:Name="FriendsDrawerButton" Background="Transparent" BorderBrush="#3A4352" BorderThickness="1" Padding="10,7" Margin="0,0,10,0" Click="FriendsDrawerButton_Click">
+                            <Button.ToolTip>
+                                <ToolTip Background="#11161E" BorderBrush="#303744" BorderThickness="1" Foreground="#E8EEF7" Padding="8,4">
+                                    <TextBlock Text="Friends" Foreground="#E8EEF7"/>
+                                </ToolTip>
+                            </Button.ToolTip>
+                            <Grid>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,2,0">
+                                    <TextBlock Text="👥" FontSize="14" VerticalAlignment="Center"/>
+                                    <TextBlock x:Name="FriendsDrawerChevronText" Text="›" FontSize="18" Margin="8,0,0,0" Foreground="#C7CFDC" VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <Border x:Name="FriendsUnreadBadge"
+                                        Visibility="Collapsed"
+                                        HorizontalAlignment="Right"
+                                        VerticalAlignment="Top"
+                                        Margin="0,-12,-15,0"
+                                        MinWidth="20"
+                                        Height="20"
+                                        Padding="5,0"
+                                        Background="#E5484D"
+                                        BorderBrush="#12161E"
+                                        BorderThickness="2"
+                                        CornerRadius="10">
+                                    <TextBlock x:Name="FriendsUnreadBadgeText"
+                                               Text="1"
+                                               Foreground="White"
+                                               FontSize="10"
+                                               FontWeight="Bold"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center"/>
+                                </Border>
+                            </Grid>
+                        </Button>
+                        <Button x:Name="AccountButton" Background="Transparent" Padding="10,7" Click="AccountButton_Click">
+                            <StackPanel Orientation="Horizontal">
+                                <Border x:Name="RankBadgeBorder" CornerRadius="4" Padding="8,4" Background="#285B91" VerticalAlignment="Center">
+                                    <TextBlock x:Name="RankBadgeText" Text="USER" FontSize="10" FontWeight="Bold"/>
+                                </Border>
+                                <TextBlock x:Name="PlayerNameText" FontSize="15" FontWeight="SemiBold" Margin="10,0,6,0" VerticalAlignment="Center"/>
+                                <TextBlock Text="⌄" FontSize="16" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
                     <Popup x:Name="AccountPopup" Placement="Bottom" PlacementTarget="{Binding ElementName=AccountButton}" StaysOpen="False" AllowsTransparency="True">
                         <Border Background="#202530" BorderBrush="#414959" BorderThickness="1" CornerRadius="5" Padding="6" Width="210">
                             <StackPanel>
@@ -360,6 +395,35 @@
                                         </ComboBox>
                                     </StackPanel>
                                 </Border>
+                            </StackPanel>
+                        </ScrollViewer>
+
+                        <ScrollViewer x:Name="FriendsPanel" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                            <ScrollViewer.Resources>
+                                <Style TargetType="{x:Type ScrollBar}" BasedOn="{StaticResource LauncherContentScrollBarStyle}"/>
+                            </ScrollViewer.Resources>
+                            <StackPanel Margin="32,26,32,28">
+                                <TextBlock Text="SOCIAL" Foreground="#38BDF8" FontWeight="Bold" FontSize="11"/>
+                                <TextBlock Text="Friends" FontSize="30" FontWeight="Bold" Margin="0,8,0,4"/>
+                                <TextBlock x:Name="FriendsSummaryText" Text="Loading your in-game friend list..." Foreground="#AAB4C5" TextWrapping="Wrap" Margin="0,0,0,16"/>
+                                <Border Background="#11161E" BorderBrush="#303744" BorderThickness="1" CornerRadius="6" Padding="13" Margin="0,0,0,18">
+                                    <StackPanel>
+                                        <TextBlock Text="READ-ONLY SYNC" Foreground="#22D3EE" FontWeight="Bold" FontSize="9"/>
+                                        <TextBlock Text="This page mirrors your current in-game friends and ignored players. Add, remove, and messaging controls remain disabled during this safety stage. Presence is now synchronized between the launcher and game." Foreground="#C7CFDC" TextWrapping="Wrap" Margin="0,5,0,0"/>
+                                    </StackPanel>
+                                </Border>
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="Friends" FontSize="18" FontWeight="Bold"/>
+                                    <TextBlock x:Name="FriendsCountText" Grid.Column="1" Foreground="#8FA0B7" VerticalAlignment="Center"/>
+                                </Grid>
+                                <StackPanel x:Name="FriendsListPanel" Margin="0,0,0,20"/>
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="Ignored Players" FontSize="18" FontWeight="Bold"/>
+                                    <TextBlock x:Name="IgnoredCountText" Grid.Column="1" Foreground="#8FA0B7" VerticalAlignment="Center"/>
+                                </Grid>
+                                <StackPanel x:Name="IgnoredListPanel"/>
                             </StackPanel>
                         </ScrollViewer>
                     </Grid>

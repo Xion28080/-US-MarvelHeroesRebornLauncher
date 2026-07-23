@@ -1,0 +1,237 @@
+<Window x:Class="MHRebornLauncher.FriendsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Friends"
+        Width="360"
+        Height="620"
+        MinWidth="320"
+        MinHeight="420"
+        Background="#0D1017"
+        ShowInTaskbar="False"
+        ResizeMode="NoResize"
+        WindowStyle="None"
+        AllowsTransparency="True">
+
+    <Window.Resources>
+        <Style x:Key="DarkToolTipStyle" TargetType="{x:Type ToolTip}">
+            <Setter Property="Background" Value="#11161E"/>
+            <Setter Property="Foreground" Value="#E8EEF7"/>
+            <Setter Property="BorderBrush" Value="#303744"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="8,5"/>
+            <Setter Property="HasDropShadow" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ToolTip}">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="4"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="DarkContextMenuStyle" TargetType="{x:Type ContextMenu}">
+            <Setter Property="Background" Value="#181C25"/>
+            <Setter Property="Foreground" Value="#E8EEF7"/>
+            <Setter Property="BorderBrush" Value="#303744"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="4"/>
+            <Setter Property="HasDropShadow" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ContextMenu}">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="5"
+                                Padding="{TemplateBinding Padding}">
+                            <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="DarkMenuItemStyle" TargetType="{x:Type MenuItem}">
+            <Setter Property="Foreground" Value="#E8EEF7"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type MenuItem}">
+                        <Border x:Name="MenuItemBorder"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="3"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter ContentSource="Header"
+                                              RecognizesAccessKey="True"
+                                              HorizontalAlignment="Left"
+                                              VerticalAlignment="Center"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="MenuItemBorder" Property="Background" Value="#283141"/>
+                                <Setter Property="Foreground" Value="#FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="#667085"/>
+                                <Setter Property="Cursor" Value="Arrow"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="DarkMenuSeparatorStyle" TargetType="{x:Type Separator}">
+            <Setter Property="Margin" Value="8,3"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Separator}">
+                        <Border Height="1" Background="#3A4352"/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="{x:Type ToolTip}" BasedOn="{StaticResource DarkToolTipStyle}"/>
+    </Window.Resources>
+    <Border Background="#181C25" BorderBrush="#303744" BorderThickness="1" CornerRadius="8" Padding="0">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <Border Background="#12161E" BorderBrush="#303744" BorderThickness="0,0,0,1" CornerRadius="8,8,0,0" Padding="14,12">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="SOCIAL" Foreground="#38BDF8" FontWeight="Bold" FontSize="10"/>
+                        <TextBlock Text="Friends" Foreground="White" FontWeight="Bold" FontSize="24" Margin="0,4,0,0"/>
+                        <!-- Kept for existing code-behind status assignments, but intentionally hidden from the tuned UI. -->
+                        <TextBlock x:Name="FriendsSummaryText" Visibility="Collapsed"/>
+                    </StackPanel>
+                    <Button x:Name="ClosePanelButton" Grid.Column="1" Content="✕" Width="34" Height="30" Background="Transparent" BorderThickness="0" Foreground="#C7CFDC" ToolTip="Close friends panel" Click="ClosePanelButton_Click"/>
+                </Grid>
+            </Border>
+
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <ScrollViewer.Resources>
+                    <Style TargetType="{x:Type ScrollBar}">
+                        <Setter Property="Width" Value="7"/>
+                        <Setter Property="MinWidth" Value="1"/>
+                        <Setter Property="Background" Value="Transparent"/>
+                        <Setter Property="Margin" Value="3,3,3,3"/>
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="{x:Type ScrollBar}">
+                                    <Grid Background="Transparent">
+                                        <Track x:Name="PART_Track" IsDirectionReversed="True">
+                                            <Track.DecreaseRepeatButton>
+                                                <RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0" Focusable="False"/>
+                                            </Track.DecreaseRepeatButton>
+                                            <Track.Thumb>
+                                                <Thumb MinHeight="38">
+                                                    <Thumb.Template>
+                                                        <ControlTemplate TargetType="{x:Type Thumb}">
+                                                            <Border Background="#626B7B" CornerRadius="4"/>
+                                                        </ControlTemplate>
+                                                    </Thumb.Template>
+                                                </Thumb>
+                                            </Track.Thumb>
+                                            <Track.IncreaseRepeatButton>
+                                                <RepeatButton Command="ScrollBar.PageDownCommand" Opacity="0" Focusable="False"/>
+                                            </Track.IncreaseRepeatButton>
+                                        </Track>
+                                    </Grid>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </ScrollViewer.Resources>
+                <StackPanel Margin="16,16,16,18">
+                    <Border Background="#11161E" BorderBrush="#303744" BorderThickness="1" CornerRadius="6" Padding="13" Margin="0,0,0,16">
+                        <StackPanel>
+                            <TextBlock Text="FRIEND MANAGEMENT" Foreground="#22D3EE" FontWeight="Bold" FontSize="9"/>
+                            <TextBlock Text="Friend changes apply immediately while you are in game. If you are offline, they are queued safely and applied the next time you enter the game." Foreground="#C7CFDC" TextWrapping="Wrap" FontSize="11" Margin="0,5,0,0"/>
+                            <Grid Margin="0,12,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="AddFriendNameTextBox" Height="34" Padding="9,6" Background="#0F141C" Foreground="White" BorderBrush="#303744" ToolTip="Enter an exact player name" KeyDown="AddFriendNameTextBox_KeyDown"/>
+                                <Button x:Name="AddFriendButton" Grid.Column="1" Content="ADD FRIEND" Width="98" Height="34" Margin="8,0,0,0" Background="#148BEB" Click="AddFriendButton_Click"/>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Friends" FontSize="18" FontWeight="Bold" Foreground="White"/>
+                        <TextBlock x:Name="FriendsCountText" Grid.Column="1" Foreground="#8FA0B7" VerticalAlignment="Center"/>
+                    </Grid>
+
+
+                    <Grid x:Name="PendingChangesHeader" Visibility="Collapsed" Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Pending Changes" FontSize="14" FontWeight="SemiBold" Foreground="#FBBF24"/>
+                        <TextBlock x:Name="PendingChangesCountText" Grid.Column="1" Foreground="#8FA0B7" VerticalAlignment="Center"/>
+                    </Grid>
+                    <StackPanel x:Name="PendingChangesListPanel" Margin="0,0,0,16"/>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Online" FontSize="14" FontWeight="SemiBold" Foreground="#4ADE80"/>
+                        <TextBlock x:Name="OnlineFriendsCountText" Grid.Column="1" Foreground="#8FA0B7" VerticalAlignment="Center"/>
+                    </Grid>
+                    <StackPanel x:Name="OnlineFriendsListPanel" Margin="0,0,0,16"/>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Offline" FontSize="14" FontWeight="SemiBold" Foreground="#8A95A8"/>
+                        <TextBlock x:Name="OfflineFriendsCountText" Grid.Column="1" Foreground="#8FA0B7" VerticalAlignment="Center"/>
+                    </Grid>
+                    <StackPanel x:Name="OfflineFriendsListPanel" Margin="0,0,0,16"/>
+
+                    <Grid Margin="0,4,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Ignored Players" FontSize="18" FontWeight="Bold" Foreground="White"/>
+                        <TextBlock x:Name="IgnoredCountText" Grid.Column="1" Foreground="#8FA0B7" VerticalAlignment="Center"/>
+                    </Grid>
+                    <StackPanel x:Name="IgnoredListPanel"/>
+                </StackPanel>
+            </ScrollViewer>
+
+            <Border Grid.Row="2" Background="#11151C" BorderBrush="#303642" BorderThickness="0,1,0,0" CornerRadius="0,0,8,8" Padding="14,10">
+                <TextBlock x:Name="StatusText" Text="Friends, presence, and unread messages refresh automatically" Foreground="#808A9C" FontSize="11"/>
+            </Border>
+        </Grid>
+    </Border>
+</Window>

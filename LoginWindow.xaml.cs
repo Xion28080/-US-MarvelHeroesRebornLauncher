@@ -38,9 +38,18 @@ public partial class LoginWindow : Window
         LoginButton.IsEnabled = false;
         LoginButton.Content = "SIGNING IN...";
 
-        LoginResponse result = await _authService.LoginAsync(_settings, saved.EmailAddress, saved.Password);
+        LoginResponse result = !string.IsNullOrWhiteSpace(saved.RefreshToken)
+            ? await _authService.RefreshAsync(_settings, saved.RefreshToken)
+            : await _authService.LoginAsync(_settings, saved.EmailAddress, saved.Password);
         if (result.Success)
         {
+            _savedLoginService.Save(new SavedLogin
+            {
+                EmailAddress = saved.EmailAddress,
+                Password = saved.Password,
+                RefreshToken = result.RefreshToken,
+                RefreshTokenExpiresAtUtc = result.RefreshTokenExpiresAtUtc
+            });
             CompleteLogin(saved.EmailAddress, saved.Password, result);
             return;
         }
@@ -79,9 +88,19 @@ public partial class LoginWindow : Window
         }
 
         if (RememberMeCheckBox.IsChecked == true)
-            _savedLoginService.Save(new SavedLogin { EmailAddress = email, Password = password });
+        {
+            _savedLoginService.Save(new SavedLogin
+            {
+                EmailAddress = email,
+                Password = password,
+                RefreshToken = result.RefreshToken,
+                RefreshTokenExpiresAtUtc = result.RefreshTokenExpiresAtUtc
+            });
+        }
         else
+        {
             _savedLoginService.Clear();
+        }
 
         CompleteLogin(email, password, result);
     }

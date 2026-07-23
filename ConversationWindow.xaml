@@ -1,0 +1,153 @@
+<Window x:Class="MHRebornLauncher.ConversationWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        Title="Direct Messages"
+        Width="500" Height="600" MinWidth="390" MinHeight="440"
+        WindowStartupLocation="CenterOwner"
+        Background="#0D1017"
+        WindowStyle="None"
+        ResizeMode="CanResize"
+        ShowInTaskbar="False">
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="0" ResizeBorderThickness="6" GlassFrameThickness="0"
+                                  CornerRadius="7" UseAeroCaptionButtons="False"/>
+    </shell:WindowChrome.WindowChrome>
+
+    <Window.Resources>
+        <Style x:Key="ConversationScrollBarStyle" TargetType="{x:Type ScrollBar}">
+            <Setter Property="Width" Value="7"/><Setter Property="MinWidth" Value="1"/>
+            <Setter Property="Background" Value="Transparent"/><Setter Property="Margin" Value="3"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ScrollBar}">
+                        <Grid Background="Transparent">
+                            <Track x:Name="PART_Track" IsDirectionReversed="True">
+                                <Track.DecreaseRepeatButton><RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0" Focusable="False"/></Track.DecreaseRepeatButton>
+                                <Track.Thumb><Thumb MinHeight="38"><Thumb.Template><ControlTemplate TargetType="{x:Type Thumb}"><Border Background="#626B7B" CornerRadius="4"/></ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
+                                <Track.IncreaseRepeatButton><RepeatButton Command="ScrollBar.PageDownCommand" Opacity="0" Focusable="False"/></Track.IncreaseRepeatButton>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="DarkToolTipStyle" TargetType="{x:Type ToolTip}">
+            <Setter Property="Background" Value="#11161E"/><Setter Property="BorderBrush" Value="#303744"/>
+            <Setter Property="BorderThickness" Value="1"/><Setter Property="Foreground" Value="#E8EEF7"/>
+            <Setter Property="Padding" Value="8,4"/><Setter Property="FontSize" Value="11"/>
+        </Style>
+        <Style x:Key="DarkContextMenuStyle" TargetType="{x:Type ContextMenu}">
+            <Setter Property="Background" Value="#181C25"/>
+            <Setter Property="Foreground" Value="#E8EEF7"/>
+            <Setter Property="BorderBrush" Value="#303744"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="4"/>
+            <Setter Property="HasDropShadow" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ContextMenu}">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="5" Padding="{TemplateBinding Padding}">
+                            <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="DarkMenuItemStyle" TargetType="{x:Type MenuItem}">
+            <Setter Property="Foreground" Value="#E8EEF7"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type MenuItem}">
+                        <Border x:Name="MenuItemBorder" Background="{TemplateBinding Background}"
+                                CornerRadius="3" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter ContentSource="Header" RecognizesAccessKey="True"
+                                              HorizontalAlignment="Left" VerticalAlignment="Center"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="MenuItemBorder" Property="Background" Value="#283141"/>
+                                <Setter Property="Foreground" Value="#FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="#667085"/>
+                                <Setter Property="Cursor" Value="Arrow"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Border Background="#181C25" BorderBrush="#303744" BorderThickness="1" CornerRadius="7" ClipToBounds="True">
+        <Grid>
+            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+
+            <Border Grid.Row="0" Background="#12161E" BorderBrush="#303744" BorderThickness="0,0,0,1"
+                    CornerRadius="7,7,0,0" Padding="16,13" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+                <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="DIRECT MESSAGES" Foreground="#38BDF8" FontSize="10" FontWeight="Bold"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                            <TextBlock x:Name="ConversationTitleText" FontSize="25" FontWeight="Bold" Foreground="White"/>
+                            <TextBlock x:Name="ConversationTitleMutedIcon" Text="🔕" FontFamily="Segoe UI Emoji" FontSize="17"
+                                       Foreground="#9BA7BA" VerticalAlignment="Center" Margin="9,1,0,0" Visibility="Collapsed">
+                                <TextBlock.ToolTip><ToolTip Style="{StaticResource DarkToolTipStyle}"><TextBlock Text="Conversation notifications are muted" Foreground="#E8EEF7"/></ToolTip></TextBlock.ToolTip>
+                            </TextBlock>
+                        </StackPanel>
+                        <TextBlock Text="Messages are synchronized between the launcher and in-game whispers."
+                                   Foreground="#AAB4C5" TextWrapping="Wrap" FontSize="11" Margin="0,5,10,0"/>
+                    </StackPanel>
+                    <Button Grid.Column="1" Content="✕" Width="34" Height="30" Background="Transparent"
+                            BorderThickness="0" Foreground="#C7CFDC" Click="CloseWindowButton_Click" VerticalAlignment="Top">
+                        <Button.ToolTip><ToolTip Style="{StaticResource DarkToolTipStyle}"><TextBlock Text="Close direct messages" Foreground="#E8EEF7"/></ToolTip></Button.ToolTip>
+                    </Button>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition x:Name="ConversationSidebarColumn" Width="0"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <Border x:Name="ConversationSidebar" Grid.Column="0" Visibility="Collapsed" Background="#11161E"
+                        BorderBrush="#303744" BorderThickness="0,0,1,0" Padding="8,12">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Top" Text="CONVERSATIONS" Foreground="#7F8A9D" FontSize="9"
+                                   FontWeight="Bold" Margin="7,0,7,8"/>
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                            <ScrollViewer.Resources><Style TargetType="{x:Type ScrollBar}" BasedOn="{StaticResource ConversationScrollBarStyle}"/></ScrollViewer.Resources>
+                            <StackPanel x:Name="ConversationTabsPanel"/>
+                        </ScrollViewer>
+                    </DockPanel>
+                </Border>
+
+                <Grid Grid.Column="1">
+                    <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <Border Grid.Row="0" Margin="14,14,14,0" Background="#11161E" BorderBrush="#2A303C" BorderThickness="1" CornerRadius="6" ClipToBounds="True">
+                        <ScrollViewer x:Name="MessagesScrollViewer" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="10">
+                            <ScrollViewer.Resources><Style TargetType="{x:Type ScrollBar}" BasedOn="{StaticResource ConversationScrollBarStyle}"/></ScrollViewer.Resources>
+                            <StackPanel x:Name="MessagesPanel"/>
+                        </ScrollViewer>
+                    </Border>
+                    <Grid Grid.Row="1" Margin="14,12,14,14">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <TextBox x:Name="MessageInputTextBox" MaxLength="500" Height="40" Padding="11,9"
+                                 Background="#11161E" BorderBrush="#303744" Foreground="#E8EEF7" KeyDown="MessageInputTextBox_KeyDown"/>
+                        <Button x:Name="SendButton" Grid.Column="1" Content="SEND" Width="82" Height="40" Margin="8,0,0,0" Click="SendButton_Click"/>
+                    </Grid>
+                </Grid>
+            </Grid>
+        </Grid>
+    </Border>
+</Window>

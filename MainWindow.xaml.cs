@@ -7,6 +7,7 @@ using System.Runtime.InteropServices;
 using Microsoft.Web.WebView2.Core;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 using MHRebornLauncher.Models;
@@ -24,6 +25,10 @@ public partial class MainWindow : Window
     private readonly ServerStatusService _serverStatusService = new();
     private readonly EventStatusService _eventStatusService = new();
     private readonly PlayerDashboardService _playerDashboardService = new();
+    private readonly SocialFriendsService _socialFriendsService = new();
+    private readonly SocialPresenceService _socialPresenceService = new();
+    private readonly SocialMessagesService _socialMessagesService = new();
+    private readonly AuthService _authService = new();
     private readonly GameLauncherService _gameLauncherService = new();
     private readonly GamePathService _gamePathService = new();
     private readonly UpdateService _updateService = new();
@@ -31,12 +36,22 @@ public partial class MainWindow : Window
     private readonly SavedLoginService _savedLoginService = new();
     private readonly SettingsService _settingsService = new();
     private readonly DiscordRichPresenceService _discordPresenceService = new();
+    private readonly MediaPlayer _dmSoundPlayer = new();
+    private string? _dmSoundFilePath;
     private readonly DispatcherTimer _serverStatusTimer;
     private readonly DispatcherTimer _eventStatusTimer;
     private readonly DispatcherTimer _dashboardTimer;
     private readonly DispatcherTimer _gameProcessTimer;
+    private readonly DispatcherTimer _presenceTimer;
+    private readonly DispatcherTimer _friendsTimer;
+    private readonly DispatcherTimer _messagesTimer;
     private PlayerDashboardResponse? _dashboard;
     private DashboardNotice? _activeNotice;
+    private FriendsWindow? _friendsWindow;
+    private SocialFriendsResponse? _latestFriendsResponse;
+    private readonly List<SocialDirectMessage> _messageCache = [];
+    private ConversationWindow? _conversationWindow;
+    private long _messageCursor = DateTimeOffset.UtcNow.AddDays(-7).ToUnixTimeSeconds();
     private int _activeDashboardTab; // 0=news, 1=goals, 2=account
     private bool _updatingPreviewCombo;
     private bool _pendingRewardsPopupShown;
@@ -46,6 +61,10 @@ public partial class MainWindow : Window
     private bool _gameWindowSeen;
     private int? _launchedGameProcessId;
     private bool _serverOnline;
+    private bool _shutdownPresenceSent;
+    private bool _friendsRefreshRunning;
+    private bool _presenceUpdateRunning;
+    private bool _messageNotificationBaselineEstablished;
     private string? _activeEventName;
 
     [DllImport("user32.dll")]
@@ -66,6 +85,31 @@ public partial class MainWindow : Window
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetWindowRect(IntPtr hWnd, out NativeRect rect);
 
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromWindow(IntPtr hWnd, uint dwFlags);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool FlashWindowEx(ref FlashWindowInfo flashInfo);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MonitorInfo monitorInfo);
+
+    private const uint MonitorDefaultToNearest = 2;
+    private const uint FlashWindowTray = 0x00000002;
+    private const uint FlashWindowTimerNoForeground = 0x0000000C;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FlashWindowInfo
+    {
+        public uint Size;
+        public IntPtr WindowHandle;
+        public uint Flags;
+        public uint Count;
+        public uint Timeout;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeRect
     {
@@ -73,6 +117,15 @@ public partial class MainWindow : Window
         public int Top;
         public int Right;
         public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+    private struct MonitorInfo
+    {
+        public int Size;
+        public NativeRect Monitor;
+        public NativeRect WorkArea;
+        public uint Flags;
     }
     private List<NewsPost> _posts = [];
     private int _currentPostIndex;
@@ -101,16 +154,52 @@ public partial class MainWindow : Window
         _dashboardTimer.Tick += async (_, _) => await RefreshDashboardAsync();
         _gameProcessTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _gameProcessTimer.Tick += (_, _) => RefreshGameProcessState();
+        _presenceTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(Random.Shared.Next(14, 19)) };
+        _presenceTimer.Tick += async (_, _) => await PresenceTimer_TickAsync();
+        _friendsTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+        _friendsTimer.Tick += async (_, _) => await FriendsTimer_TickAsync();
+        _messagesTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+        _messagesTimer.Tick += async (_, _) => await RefreshMessagesAsync();
 
         Loaded += MainWindow_Loaded;
+        Closing += MainWindow_Closing;
         Closed += (_, _) =>
         {
             _serverStatusTimer.Stop();
             _eventStatusTimer.Stop();
             _dashboardTimer.Stop();
             _gameProcessTimer.Stop();
+            _presenceTimer.Stop();
+            _friendsTimer.Stop();
+            _messagesTimer.Stop();
+            if (_friendsWindow is not null)
+            {
+                _friendsWindow.Closed -= FriendsWindow_Closed;
+            _friendsWindow.FriendActionRequested -= FriendsWindow_FriendActionRequested;
+                _friendsWindow.Close();
+                _friendsWindow = null;
+            }
+            if (_conversationWindow is not null)
+            {
+                _conversationWindow.MessageSendRequested -= ConversationWindow_MessageSendRequested;
+                _conversationWindow.ConversationActivated -= ConversationWindow_ConversationActivated;
+                _conversationWindow.ConversationMuteRequested -= ConversationWindow_ConversationMuteRequested;
+                _conversationWindow.Close();
+                _conversationWindow = null;
+            }
+            _dmSoundPlayer.Close();
             _discordPresenceService.Dispose();
         };
+    }
+
+    private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        if (_shutdownPresenceSent)
+            return;
+
+        _shutdownPresenceSent = true;
+        _presenceTimer.Stop();
+        _socialPresenceService.UpdateBeforeShutdown(_settings, _account.AccessToken);
     }
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -118,12 +207,16 @@ public partial class MainWindow : Window
         UpdateGameDetectionUi();
         await InitializeNewsWebViewAsync();
         _discordPresenceService.SetEnabled(_settings.EnableDiscordRichPresence);
-        await Task.WhenAll(LoadNewsAsync(), RefreshServerStatusAsync(), RefreshEventStatusAsync(), RefreshDashboardAsync());
+        await Task.WhenAll(LoadNewsAsync(), RefreshServerStatusAsync(), RefreshEventStatusAsync(), RefreshDashboardAsync(), RefreshFriendsAsync(), RefreshLauncherPresenceAsync());
         UpdateDiscordPresence();
         _serverStatusTimer.Start();
         _eventStatusTimer.Start();
         _dashboardTimer.Start();
         _gameProcessTimer.Start();
+        _presenceTimer.Start();
+        _friendsTimer.Start();
+        _messagesTimer.Start();
+        await RefreshMessagesAsync();
         _ = CheckForLauncherUpdateAsync();
     }
 
@@ -455,7 +548,7 @@ body { overflow-x: hidden; padding-right: 12px; }
 
     private async Task RefreshDashboardAsync()
     {
-        PlayerDashboardResponse response = await _playerDashboardService.GetAsync(_settings, _currentEmail, _currentPassword);
+        PlayerDashboardResponse response = await _playerDashboardService.GetAsync(_settings, _account.AccessToken);
         if (!response.Success)
         {
             if (_activeDashboardTab == 1)
@@ -476,6 +569,224 @@ body { overflow-x: hidden; padding-right: 12px; }
         else if (_activeDashboardTab == 2)
             NewsStatusText.Text = "Account Dashboard refreshes automatically every 30 seconds";
     }
+
+    private async Task PresenceTimer_TickAsync()
+    {
+        if (_presenceUpdateRunning)
+            return;
+
+        _presenceUpdateRunning = true;
+        try
+        {
+            await RefreshLauncherPresenceAsync();
+        }
+        finally
+        {
+            _presenceUpdateRunning = false;
+            // Jitter prevents many launchers opened together from writing in lockstep.
+            _presenceTimer.Interval = TimeSpan.FromSeconds(Random.Shared.Next(14, 19));
+        }
+    }
+
+    private async Task FriendsTimer_TickAsync()
+    {
+        if (_friendsRefreshRunning)
+            return;
+
+        _friendsRefreshRunning = true;
+        try
+        {
+            await RefreshFriendsAsync();
+        }
+        finally
+        {
+            _friendsRefreshRunning = false;
+            // Poll quickly while the panel is visible, and back off when it is closed.
+            int minimum = _friendsWindow is not null ? 3 : 8;
+            int maximumExclusive = _friendsWindow is not null ? 5 : 11;
+            _friendsTimer.Interval = TimeSpan.FromSeconds(Random.Shared.Next(minimum, maximumExclusive));
+        }
+    }
+
+    private async Task RefreshLauncherPresenceAsync()
+    {
+        await _socialPresenceService.UpdateAsync(_settings, _account.AccessToken, true);
+    }
+
+    private async Task RefreshFriendsAsync()
+    {
+        SocialFriendsResponse response = await _socialFriendsService.GetAsync(_settings, _account.AccessToken);
+        _latestFriendsResponse = response;
+        UpdateFriendsUnreadBadge(response.Success ? response.TotalUnreadCount : 0);
+        if (_conversationWindow is not null)
+        {
+            foreach (string accountId in _conversationWindow.OpenAccountIds.ToList())
+            {
+                SocialRelationshipItem? friend = (response.Friends ?? []).FirstOrDefault(item =>
+                    string.Equals(item.AccountId, accountId, StringComparison.OrdinalIgnoreCase));
+                _conversationWindow.UpdatePresence(accountId, friend?.Presence ?? "Offline", friend?.UnreadCount ?? 0);
+            }
+        }
+        FriendsListPanel.Children.Clear();
+        IgnoredListPanel.Children.Clear();
+
+        if (_friendsWindow is not null)
+        {
+            _friendsWindow.SetMutedAccounts(GetMutedAccountIds());
+            _friendsWindow.ApplySnapshot(response);
+        }
+
+        if (!response.Success)
+        {
+            string message = string.IsNullOrWhiteSpace(response.Error)
+                ? "Unable to load your in-game friend snapshot."
+                : response.Error;
+            FriendsSummaryText.Text = message;
+            FriendsCountText.Text = "Unavailable";
+            IgnoredCountText.Text = "Unavailable";
+            FriendsListPanel.Children.Add(CreateSocialEmptyCard(message));
+            IgnoredListPanel.Children.Add(CreateSocialEmptyCard("Ignored players are unavailable until the next successful refresh."));
+            return;
+        }
+
+        if (!response.Imported)
+        {
+            FriendsSummaryText.Text = "No in-game social snapshot has been imported yet. Log this account into the game once, then refresh this page.";
+        }
+        else if (response.ImportedAtUtc > 0)
+        {
+            DateTimeOffset imported = DateTimeOffset.FromUnixTimeSeconds(response.ImportedAtUtc).ToLocalTime();
+            FriendsSummaryText.Text = $"Read-only in-game snapshot imported {imported:MMM d, yyyy h:mm tt}. Presence is synchronized between the launcher and game.";
+        }
+        else
+        {
+            FriendsSummaryText.Text = "Your read-only in-game social snapshot is available. Presence is synchronized between the launcher and game.";
+        }
+
+        List<SocialRelationshipItem> friends = response.Friends ?? [];
+        List<SocialRelationshipItem> ignored = response.Ignored ?? [];
+        FriendsCountText.Text = friends.Count == 1 ? "1 friend" : $"{friends.Count} friends";
+        IgnoredCountText.Text = ignored.Count == 1 ? "1 ignored" : $"{ignored.Count} ignored";
+
+        foreach (SocialRelationshipItem friend in friends)
+            FriendsListPanel.Children.Add(CreateSocialPersonCard(friend, false));
+        foreach (SocialRelationshipItem player in ignored)
+            IgnoredListPanel.Children.Add(CreateSocialPersonCard(player, true));
+
+        if (friends.Count == 0)
+            FriendsListPanel.Children.Add(CreateSocialEmptyCard(response.Imported ? "No friends are currently in your in-game friend list." : "Waiting for the first in-game import."));
+        if (ignored.Count == 0)
+            IgnoredListPanel.Children.Add(CreateSocialEmptyCard(response.Imported ? "No players are currently ignored." : "Waiting for the first in-game import."));
+
+        if (_activeDashboardTab == 3)
+            NewsStatusText.Text = "Friend snapshots refresh automatically every 30 seconds";
+    }
+
+    private static Border CreateSocialPersonCard(SocialRelationshipItem person, bool ignored)
+    {
+        Grid grid = new();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        (string presenceText, Color presenceColor) = GetPresenceDisplay(person, ignored);
+        System.Windows.Shapes.Ellipse dot = new()
+        {
+            Width = 9,
+            Height = 9,
+            Fill = new SolidColorBrush(presenceColor),
+            Margin = new Thickness(0, 0, 11, 0),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        grid.Children.Add(dot);
+
+        StackPanel identity = new();
+        identity.Children.Add(new TextBlock
+        {
+            Text = string.IsNullOrWhiteSpace(person.PlayerName) ? "Unknown Player" : person.PlayerName,
+            Foreground = Brushes.White,
+            FontWeight = FontWeights.SemiBold,
+            FontSize = 13
+        });
+        identity.Children.Add(new TextBlock
+        {
+            Text = presenceText,
+            Foreground = new SolidColorBrush(presenceColor),
+            FontSize = 10,
+            Margin = new Thickness(0, 3, 0, 0)
+        });
+        Grid.SetColumn(identity, 1);
+        grid.Children.Add(identity);
+
+        Border badge = new()
+        {
+            Background = new SolidColorBrush(ignored ? Color.FromRgb(54, 24, 30) : Color.FromRgb(34, 41, 54)),
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(9, 3, 9, 3),
+            VerticalAlignment = VerticalAlignment.Center,
+            Child = new TextBlock
+            {
+                Text = ignored ? "IGNORED" : "READ ONLY",
+                Foreground = new SolidColorBrush(ignored ? Color.FromRgb(248, 113, 113) : Color.FromRgb(155, 167, 186)),
+                FontSize = 9,
+                FontWeight = FontWeights.Bold
+            }
+        };
+        Grid.SetColumn(badge, 2);
+        grid.Children.Add(badge);
+
+        return new Border
+        {
+            Background = new SolidColorBrush(Color.FromRgb(17, 22, 30)),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(42, 48, 60)),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(6),
+            Padding = new Thickness(13, 10, 13, 10),
+            Margin = new Thickness(0, 0, 0, 7),
+            Child = grid
+        };
+    }
+
+    private static (string Text, Color Color) GetPresenceDisplay(SocialRelationshipItem person, bool ignored)
+    {
+        if (ignored)
+            return ("Ignored in game", Color.FromRgb(239, 68, 68));
+
+        return person.Presence switch
+        {
+            "InGame" => ("In Game", Color.FromRgb(56, 189, 248)),
+            "LauncherOnline" => ("Online", Color.FromRgb(74, 222, 128)),
+            _ => (FormatLastSeen(person.LastSeenAtUtc), Color.FromRgb(98, 107, 123))
+        };
+    }
+
+    private static string FormatLastSeen(long lastSeenAtUtc)
+    {
+        if (lastSeenAtUtc <= 0)
+            return "Offline";
+
+        DateTimeOffset lastSeen = DateTimeOffset.FromUnixTimeSeconds(lastSeenAtUtc).ToLocalTime();
+        TimeSpan elapsed = DateTimeOffset.Now - lastSeen;
+        if (elapsed.TotalMinutes < 2) return "Offline • just now";
+        if (elapsed.TotalHours < 1) return $"Offline • {(int)elapsed.TotalMinutes}m ago";
+        if (elapsed.TotalDays < 1) return $"Offline • {(int)elapsed.TotalHours}h ago";
+        if (elapsed.TotalDays < 30) return $"Offline • {(int)elapsed.TotalDays}d ago";
+        return $"Offline • {lastSeen:MMM d}";
+    }
+
+    private static Border CreateSocialEmptyCard(string message) => new()
+    {
+        Background = new SolidColorBrush(Color.FromRgb(17, 22, 30)),
+        CornerRadius = new CornerRadius(6),
+        Padding = new Thickness(13),
+        Margin = new Thickness(0, 0, 0, 7),
+        Child = new TextBlock
+        {
+            Text = message,
+            Foreground = new SolidColorBrush(Color.FromRgb(138, 149, 168)),
+            TextWrapping = TextWrapping.Wrap
+        }
+    };
 
     private void QueuePendingRewardsPopup(PlayerDashboardResponse response)
     {
@@ -669,13 +980,13 @@ body { overflow-x: hidden; padding-right: 12px; }
     private void NewsTabButton_Click(object sender, RoutedEventArgs e) => ShowDashboardTab(0);
     private void GoalsTabButton_Click(object sender, RoutedEventArgs e) => ShowDashboardTab(1);
     private void AccountTabButton_Click(object sender, RoutedEventArgs e) => ShowDashboardTab(2);
-
     private void ShowDashboardTab(int tab)
     {
         _activeDashboardTab = tab;
         NewsPanel.Visibility = tab == 0 ? Visibility.Visible : Visibility.Collapsed;
         GoalsPanel.Visibility = tab == 1 ? Visibility.Visible : Visibility.Collapsed;
         AccountPanel.Visibility = tab == 2 ? Visibility.Visible : Visibility.Collapsed;
+        FriendsPanel.Visibility = Visibility.Collapsed;
         Color active = Color.FromRgb(20, 139, 235);
         Color inactive = Color.FromRgb(48, 55, 68);
         NewsTabButton.Background = new SolidColorBrush(tab == 0 ? active : inactive);
@@ -813,7 +1124,7 @@ body { overflow-x: hidden; padding-right: 12px; }
     {
         try
         {
-            PortalTokenResponse result = await _portalService.CreatePortalLoginAsync(_settings, _currentEmail, _currentPassword);
+            PortalTokenResponse result = await _portalService.CreatePortalLoginAsync(_settings, _account.AccessToken);
             if (result.Success && !string.IsNullOrWhiteSpace(result.Url)) OpenUrl(result.Url);
             else FooterText.Text = string.IsNullOrWhiteSpace(result.Error) ? "Unable to open Account Portal." : result.Error;
         }
@@ -985,7 +1296,7 @@ body { overflow-x: hidden; padding-right: 12px; }
     {
         AccountPopup.IsOpen = false;
         FooterText.Text = "Opening Account Portal...";
-        PortalTokenResponse result = await _portalService.CreatePortalLoginAsync(_settings, _currentEmail, _currentPassword);
+        PortalTokenResponse result = await _portalService.CreatePortalLoginAsync(_settings, _account.AccessToken);
         FooterText.Text = "Ready to launch.";
         if (!result.Success || string.IsNullOrWhiteSpace(result.Url))
         {
@@ -995,8 +1306,10 @@ body { overflow-x: hidden; padding-right: 12px; }
         OpenUrl(result.Url);
     }
 
-    private void SignOutButton_Click(object sender, RoutedEventArgs e)
+    private async void SignOutButton_Click(object sender, RoutedEventArgs e)
     {
+        await _socialPresenceService.UpdateAsync(_settings, _account.AccessToken, false);
+        await _authService.RevokeAsync(_settings, _account.AccessToken);
         _savedLoginService.Clear();
         string? exe = Environment.ProcessPath;
         if (!string.IsNullOrWhiteSpace(exe))
@@ -1082,6 +1395,464 @@ body { overflow-x: hidden; padding-right: 12px; }
         return (version ?? "Unknown").Split('+')[0].Trim();
     }
 
+
+    private void FriendsDrawerButton_Click(object sender, RoutedEventArgs e)
+    {
+        ToggleFriendsWindow();
+    }
+
+    private void ToggleFriendsWindow()
+    {
+        if (_friendsWindow is not null)
+        {
+            _friendsWindow.Close();
+            return;
+        }
+
+        _friendsWindow = new FriendsWindow
+        {
+            Owner = this
+        };
+        _friendsWindow.Closed += FriendsWindow_Closed;
+        _friendsWindow.FriendActionRequested += FriendsWindow_FriendActionRequested;
+        _friendsWindow.SetMutedAccounts(GetMutedAccountIds());
+        _friendsWindow.ShowLoadingState();
+        _friendsWindow.Show();
+        DockFriendsWindow();
+        UpdateFriendsButtonState();
+        _friendsTimer.Interval = TimeSpan.FromSeconds(3);
+
+        if (_latestFriendsResponse is not null)
+            _friendsWindow.ApplySnapshot(_latestFriendsResponse);
+        else
+            _ = RefreshFriendsAsync();
+    }
+
+
+    private async void FriendsWindow_FriendActionRequested(object? sender, FriendActionRequestedEventArgs e)
+    {
+        if (e.Operation.Equals("message", StringComparison.OrdinalIgnoreCase))
+        {
+            OpenConversation(e.AccountId, e.PlayerName);
+            return;
+        }
+
+        if (e.Operation is "mute" or "unmute")
+        {
+            SetConversationMuted(e.AccountId, e.Operation == "mute");
+            return;
+        }
+
+        if (_friendsWindow is null) return;
+        string verb = e.Operation.Equals("remove", StringComparison.OrdinalIgnoreCase) ? "Removing" : "Adding";
+        _friendsWindow.SetActionState(true, $"{verb} {e.PlayerName}...");
+
+        SocialFriendActionResponse submitted = await _socialFriendsService.SubmitActionAsync(
+            _settings, _account.AccessToken, e.PlayerName, e.Operation);
+        if (!submitted.Success || string.IsNullOrWhiteSpace(submitted.CommandId))
+        {
+            _friendsWindow?.SetActionState(false, string.IsNullOrWhiteSpace(submitted.Error) ? "Friend change failed." : submitted.Error);
+            return;
+        }
+
+        if (submitted.Status.Equals("QueuedOffline", StringComparison.OrdinalIgnoreCase))
+        {
+            _friendsWindow.ClearAddFriendName();
+            _friendsWindow.SetActionState(false, string.IsNullOrWhiteSpace(submitted.Message)
+                ? "Queued safely. This change will apply the next time you enter the game."
+                : submitted.Message);
+            await RefreshFriendsAsync();
+            return;
+        }
+
+        SocialFriendActionResponse status = submitted;
+        for (int attempt = 0; attempt < 15; attempt++)
+        {
+            await Task.Delay(1000);
+            status = await _socialFriendsService.GetActionStatusAsync(_settings, _account.AccessToken, submitted.CommandId);
+            if (!status.Success) continue;
+            if (status.Status is "succeeded" or "failed" or "expired") break;
+        }
+
+        if (_friendsWindow is null) return;
+        if (status.Success && status.Status == "succeeded")
+        {
+            _friendsWindow.ClearAddFriendName();
+            _friendsWindow.SetActionState(false, string.IsNullOrWhiteSpace(status.Message) ? "Friend list updated." : status.Message);
+            await Task.Delay(1200);
+            await RefreshFriendsAsync();
+        }
+        else
+        {
+            string error = !string.IsNullOrWhiteSpace(status.Message) ? status.Message
+                : !string.IsNullOrWhiteSpace(status.Error) ? status.Error
+                : "The game server did not complete the friend change in time.";
+            _friendsWindow.SetActionState(false, error);
+        }
+    }
+
+    private async Task RefreshMessagesAsync()
+    {
+        SocialMessagesResponse response = await _socialMessagesService.GetAsync(_settings, _account.AccessToken, _messageCursor);
+        if (!response.Success)
+            return;
+
+        bool shouldNotify = false;
+        foreach (SocialDirectMessage message in response.Messages ?? [])
+        {
+            if (_messageCache.Any(existing => existing.MessageId == message.MessageId))
+                continue;
+
+            _messageCache.Add(message);
+            bool matchingConversationFocused = _conversationWindow?.IsConversationActiveAndFocused(message.OtherAccountId) == true;
+            if (_conversationWindow?.ContainsConversation(message.OtherAccountId) == true)
+            {
+                _conversationWindow.AddMessages([message]);
+                if (!message.IsOutgoing && matchingConversationFocused)
+                    _ = MarkConversationReadAsync(message.OtherAccountId);
+            }
+
+            if (_messageNotificationBaselineEstablished && !message.IsOutgoing && !matchingConversationFocused
+                && !IsConversationMuted(message.OtherAccountId))
+                shouldNotify = true;
+        }
+
+        if (response.Cursor > _messageCursor)
+            _messageCursor = response.Cursor;
+
+        if (!_messageNotificationBaselineEstablished)
+            _messageNotificationBaselineEstablished = true;
+        else if (shouldNotify && !IsGameRunning())
+        {
+            if (_settings.EnableDmTaskbarFlash)
+                FlashLauncherTaskbar();
+            if (_settings.EnableDmNotificationSound)
+                PlayDmNotificationSound();
+        }
+    }
+
+    private void FlashLauncherTaskbar()
+    {
+        IntPtr handle = new WindowInteropHelper(this).Handle;
+        if (handle == IntPtr.Zero)
+            return;
+
+        FlashWindowInfo info = new()
+        {
+            Size = (uint)Marshal.SizeOf<FlashWindowInfo>(),
+            WindowHandle = handle,
+            Flags = FlashWindowTray | FlashWindowTimerNoForeground,
+            Count = 3,
+            Timeout = 0
+        };
+        _ = FlashWindowEx(ref info);
+    }
+
+    private void OpenConversation(string accountId, string playerName)
+    {
+        if (string.IsNullOrWhiteSpace(accountId))
+            return;
+
+        if (_conversationWindow is null)
+        {
+            _conversationWindow = new ConversationWindow { Owner = this };
+            _conversationWindow.MessageSendRequested += ConversationWindow_MessageSendRequested;
+            _conversationWindow.ConversationActivated += ConversationWindow_ConversationActivated;
+            _conversationWindow.ConversationMuteRequested += ConversationWindow_ConversationMuteRequested;
+            _conversationWindow.Closed += ConversationWindow_Closed;
+            _conversationWindow.Show();
+        }
+        else if (!_conversationWindow.IsVisible)
+        {
+            _conversationWindow.Show();
+        }
+
+        SocialRelationshipItem? friend = (_latestFriendsResponse?.Friends ?? []).FirstOrDefault(item =>
+            string.Equals(item.AccountId, accountId, StringComparison.OrdinalIgnoreCase));
+        _conversationWindow.SetMutedAccounts(GetMutedAccountIds());
+        _conversationWindow.OpenConversation(
+            accountId,
+            playerName,
+            friend?.Presence ?? "Offline",
+            friend?.UnreadCount ?? 0,
+            _messageCache.Where(message => string.Equals(message.OtherAccountId, accountId, StringComparison.OrdinalIgnoreCase)));
+        _conversationWindow.Activate();
+        _ = MarkConversationReadAsync(accountId);
+        _ = RefreshMessagesAsync();
+    }
+
+    private void ConversationWindow_ConversationActivated(object? sender, ConversationActivatedEventArgs e)
+    {
+        _ = MarkConversationReadAsync(e.AccountId);
+    }
+
+    private void ConversationWindow_Closed(object? sender, EventArgs e)
+    {
+        if (_conversationWindow is null)
+            return;
+        _conversationWindow.MessageSendRequested -= ConversationWindow_MessageSendRequested;
+        _conversationWindow.ConversationActivated -= ConversationWindow_ConversationActivated;
+        _conversationWindow.ConversationMuteRequested -= ConversationWindow_ConversationMuteRequested;
+        _conversationWindow.Closed -= ConversationWindow_Closed;
+        _conversationWindow = null;
+    }
+
+    private async Task MarkConversationReadAsync(string otherAccountId)
+    {
+        if (string.IsNullOrWhiteSpace(otherAccountId))
+            return;
+
+        if (await _socialMessagesService.MarkReadAsync(_settings, _account.AccessToken, otherAccountId))
+            await RefreshFriendsAsync();
+    }
+
+    private async void ConversationWindow_MessageSendRequested(object? sender, ConversationMessageSendEventArgs e)
+    {
+        if (sender is not ConversationWindow window)
+            return;
+
+        window.SetSendState(true, "Sending message...");
+        SocialMessageSendResponse submitted = await _socialMessagesService.SendAsync(
+            _settings, _account.AccessToken, e.AccountId, e.PlayerName, e.MessageBody);
+
+        if (!submitted.Success)
+        {
+            string error = string.IsNullOrWhiteSpace(submitted.Error) ? "Unable to send the message." : submitted.Error;
+            window.SetSendState(false, error);
+            MessageBox.Show(this, error, "Message Not Sent", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        window.ClearMessageInput();
+        if (submitted.Status is "delivered" or "queued")
+        {
+            window.SetSendState(false, submitted.Message);
+            await Task.Delay(250);
+            await RefreshMessagesAsync();
+            return;
+        }
+
+        SocialMessageSendResponse status = submitted;
+        if (!string.IsNullOrWhiteSpace(submitted.CommandId))
+        {
+            for (int attempt = 0; attempt < 12; attempt++)
+            {
+                await Task.Delay(500);
+                status = await _socialMessagesService.GetSendStatusAsync(
+                    _settings, _account.AccessToken, submitted.CommandId);
+                if (status.Success && status.Status is "succeeded" or "failed" or "expired")
+                    break;
+            }
+        }
+
+        if (status.Success && string.Equals(status.Status, "succeeded", StringComparison.OrdinalIgnoreCase))
+        {
+            window.SetSendState(false, string.IsNullOrWhiteSpace(status.Message) ? "Message delivered." : status.Message);
+            await Task.Delay(250);
+            await RefreshMessagesAsync();
+        }
+        else
+        {
+            string error = !string.IsNullOrWhiteSpace(status.Message) ? status.Message
+                : !string.IsNullOrWhiteSpace(status.Error) ? status.Error
+                : "The game server did not deliver the message in time.";
+            window.SetSendState(false, error);
+            MessageBox.Show(this, error, "Message Not Sent", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+    }
+
+
+    private void ConversationWindow_ConversationMuteRequested(object? sender, ConversationMuteRequestedEventArgs e)
+    {
+        SetConversationMuted(e.AccountId, e.Mute);
+    }
+
+    private HashSet<string> GetMutedAccountIds()
+    {
+        _settings.MutedConversationAccountIds ??= [];
+        return new HashSet<string>(_settings.MutedConversationAccountIds, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private bool IsConversationMuted(string accountId) => GetMutedAccountIds().Contains(accountId);
+
+    private void SetConversationMuted(string accountId, bool muted)
+    {
+        if (string.IsNullOrWhiteSpace(accountId)) return;
+        HashSet<string> mutedIds = GetMutedAccountIds();
+        if (muted) mutedIds.Add(accountId); else mutedIds.Remove(accountId);
+        _settings.MutedConversationAccountIds = mutedIds.OrderBy(id => id, StringComparer.OrdinalIgnoreCase).ToList();
+        _settingsService.Save(_settings);
+        _friendsWindow?.SetMutedAccounts(mutedIds);
+        _conversationWindow?.SetMutedAccounts(mutedIds);
+        if (_latestFriendsResponse is not null && _friendsWindow is not null)
+            _friendsWindow.ApplySnapshot(_latestFriendsResponse);
+    }
+
+    private void InitializeDmNotificationSound()
+    {
+        try
+        {
+            var resource = Application.GetResourceStream(new Uri("pack://application:,,,/Assets/JarvisMessage.wav"));
+            if (resource?.Stream is null)
+                return;
+
+            string soundDirectory = Path.Combine(LauncherPaths.DataRoot, "Sounds");
+            Directory.CreateDirectory(soundDirectory);
+            _dmSoundFilePath = Path.Combine(soundDirectory, "JarvisMessage.wav");
+
+            using (resource.Stream)
+            using (FileStream output = new(_dmSoundFilePath, FileMode.Create, FileAccess.Write, FileShare.Read))
+                resource.Stream.CopyTo(output);
+
+            _dmSoundPlayer.Open(new Uri(_dmSoundFilePath, UriKind.Absolute));
+        }
+        catch (Exception ex)
+        {
+            LogService.Error("Unable to initialize the DM notification sound", ex);
+        }
+    }
+
+    private void PlayDmNotificationSound()
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(_dmSoundFilePath))
+                InitializeDmNotificationSound();
+
+            if (string.IsNullOrWhiteSpace(_dmSoundFilePath))
+                return;
+
+            _dmSoundPlayer.Stop();
+            _dmSoundPlayer.Position = TimeSpan.Zero;
+            _dmSoundPlayer.Volume = Math.Clamp(_settings.DmNotificationVolumePercent, 0, 100) / 100.0;
+            _dmSoundPlayer.Play();
+        }
+        catch (Exception ex)
+        {
+            LogService.Error("Unable to play the DM notification sound", ex);
+        }
+    }
+
+    private void FriendsWindow_Closed(object? sender, EventArgs e)
+    {
+        if (_friendsWindow is not null)
+        {
+            _friendsWindow.Closed -= FriendsWindow_Closed;
+            _friendsWindow.FriendActionRequested -= FriendsWindow_FriendActionRequested;
+        }
+        _friendsWindow = null;
+        UpdateFriendsButtonState();
+        _friendsTimer.Interval = TimeSpan.FromSeconds(Random.Shared.Next(8, 11));
+    }
+
+    private void UpdateFriendsUnreadBadge(int unreadCount)
+    {
+        if (FriendsUnreadBadge is null || FriendsUnreadBadgeText is null)
+            return;
+
+        int safeCount = Math.Max(0, unreadCount);
+        FriendsUnreadBadge.Visibility = safeCount > 0 ? Visibility.Visible : Visibility.Collapsed;
+        FriendsUnreadBadgeText.Text = safeCount > 99 ? "99+" : safeCount.ToString();
+
+        if (FriendsDrawerButton?.ToolTip is ToolTip toolTip)
+        {
+            toolTip.Content = new TextBlock
+            {
+                Text = safeCount > 0
+                    ? $"Friends • {safeCount} unread message{(safeCount == 1 ? string.Empty : "s")}"
+                    : "Friends",
+                Foreground = new SolidColorBrush(Color.FromRgb(232, 238, 247))
+            };
+        }
+    }
+
+    private void UpdateFriendsButtonState()
+    {
+        if (FriendsDrawerButton is null || FriendsDrawerChevronText is null)
+            return;
+
+        bool open = _friendsWindow is not null;
+        FriendsDrawerChevronText.Text = open ? "‹" : "›";
+        FriendsDrawerButton.Background = new SolidColorBrush(open ? Color.FromRgb(20, 139, 235) : Colors.Transparent);
+        FriendsDrawerButton.BorderBrush = new SolidColorBrush(open ? Color.FromRgb(20, 139, 235) : Color.FromRgb(58, 67, 82));
+    }
+
+    private void DockFriendsWindow()
+    {
+        if (_friendsWindow is null)
+            return;
+
+        Rect workArea = GetCurrentMonitorWorkArea();
+        double screenMargin = 8;
+        double gap = 10;
+        double dockWidth = 360;
+
+        // Match the Friends panel to the full visible height of the main launcher.
+        // Clamp to the monitor work area so the panel remains fully reachable.
+        double availableHeight = workArea.Bottom - workArea.Top - (screenMargin * 2);
+        double height = Math.Max(420, Math.Min(ActualHeight, availableHeight));
+
+        double top = WindowState == WindowState.Maximized ? workArea.Top + screenMargin : Top;
+        top = Math.Max(workArea.Top + screenMargin, Math.Min(top, workArea.Bottom - height - screenMargin));
+
+        double preferredRightDockLeft = Left + ActualWidth + gap;
+        double left;
+
+        bool hasRoomOnRight = preferredRightDockLeft + dockWidth <= workArea.Right - screenMargin;
+        if (hasRoomOnRight && WindowState != WindowState.Maximized)
+        {
+            left = preferredRightDockLeft;
+        }
+        else
+        {
+            left = workArea.Right - dockWidth - screenMargin;
+        }
+
+        left = Math.Max(workArea.Left + screenMargin, Math.Min(left, workArea.Right - dockWidth - screenMargin));
+
+        _friendsWindow.Width = dockWidth;
+        _friendsWindow.Height = height;
+        _friendsWindow.Left = left;
+        _friendsWindow.Top = top;
+    }
+
+    private Rect GetCurrentMonitorWorkArea()
+    {
+        IntPtr windowHandle = new WindowInteropHelper(this).Handle;
+        IntPtr monitorHandle = MonitorFromWindow(windowHandle, MonitorDefaultToNearest);
+
+        if (monitorHandle == IntPtr.Zero)
+            return SystemParameters.WorkArea;
+
+        MonitorInfo monitorInfo = new()
+        {
+            Size = Marshal.SizeOf<MonitorInfo>()
+        };
+
+        if (!GetMonitorInfo(monitorHandle, ref monitorInfo))
+            return SystemParameters.WorkArea;
+
+        DpiScale dpi = VisualTreeHelper.GetDpi(this);
+        double scaleX = dpi.DpiScaleX <= 0 ? 1 : dpi.DpiScaleX;
+        double scaleY = dpi.DpiScaleY <= 0 ? 1 : dpi.DpiScaleY;
+
+        return new Rect(
+            monitorInfo.WorkArea.Left / scaleX,
+            monitorInfo.WorkArea.Top / scaleY,
+            (monitorInfo.WorkArea.Right - monitorInfo.WorkArea.Left) / scaleX,
+            (monitorInfo.WorkArea.Bottom - monitorInfo.WorkArea.Top) / scaleY);
+    }
+
+    private void Window_PositionChanged(object? sender, EventArgs e)
+    {
+        DockFriendsWindow();
+    }
+
+    private void Window_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        DockFriendsWindow();
+    }
+
     private void TitleBar_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         if (e.ChangedButton != System.Windows.Input.MouseButton.Left || IsInsideButton(e.OriginalSource as DependencyObject))
@@ -1111,6 +1882,20 @@ body { overflow-x: hidden; padding-right: 12px; }
     {
         if (MaximizeWindowButton is not null)
             MaximizeWindowButton.Content = WindowState == WindowState.Maximized ? "❐" : "□";
+
+        if (_friendsWindow is null)
+            return;
+
+        if (WindowState == WindowState.Minimized)
+        {
+            _friendsWindow.Hide();
+        }
+        else
+        {
+            if (!_friendsWindow.IsVisible)
+                _friendsWindow.Show();
+            DockFriendsWindow();
+        }
     }
 
 }
