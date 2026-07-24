@@ -41,6 +41,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _serverStatusTimer;
     private readonly DispatcherTimer _eventStatusTimer;
     private readonly DispatcherTimer _dashboardTimer;
+    private readonly DispatcherTimer _goalCountdownTimer;
     private readonly DispatcherTimer _gameProcessTimer;
     private readonly DispatcherTimer _presenceTimer;
     private readonly DispatcherTimer _friendsTimer;
@@ -66,6 +67,8 @@ public partial class MainWindow : Window
     private bool _presenceUpdateRunning;
     private bool _messageNotificationBaselineEstablished;
     private string? _activeEventName;
+    private long _primaryScheduledGoalStartUtc;
+    private long _upcomingGoalStartUtc;
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -152,6 +155,8 @@ public partial class MainWindow : Window
         _eventStatusTimer.Tick += async (_, _) => await RefreshEventStatusAsync();
         _dashboardTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
         _dashboardTimer.Tick += async (_, _) => await RefreshDashboardAsync();
+        _goalCountdownTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _goalCountdownTimer.Tick += (_, _) => UpdateCommunityGoalCountdowns();
         _gameProcessTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _gameProcessTimer.Tick += (_, _) => RefreshGameProcessState();
         _presenceTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(Random.Shared.Next(14, 19)) };
@@ -168,6 +173,7 @@ public partial class MainWindow : Window
             _serverStatusTimer.Stop();
             _eventStatusTimer.Stop();
             _dashboardTimer.Stop();
+            _goalCountdownTimer.Stop();
             _gameProcessTimer.Stop();
             _presenceTimer.Stop();
             _friendsTimer.Stop();
@@ -212,6 +218,7 @@ public partial class MainWindow : Window
         _serverStatusTimer.Start();
         _eventStatusTimer.Start();
         _dashboardTimer.Start();
+        _goalCountdownTimer.Start();
         _gameProcessTimer.Start();
         _presenceTimer.Start();
         _friendsTimer.Start();
@@ -561,7 +568,7 @@ body { overflow-x: hidden; padding-right: 12px; }
 
         _dashboard = response;
         ApplyDashboardNotice(response.Notice);
-        RenderCommunityGoal(response.CommunityGoal);
+        RenderCommunityGoal(response.CommunityGoal, response.UpcomingCommunityGoal);
         RenderAccountDashboard(response);
         QueuePendingRewardsPopup(response);
         if (_activeDashboardTab == 1)
@@ -839,38 +846,84 @@ body { overflow-x: hidden; padding-right: 12px; }
         NoticeBanner.Visibility = Visibility.Visible;
     }
 
-    private void RenderCommunityGoal(CommunityGoalDashboard? goal)
+    private void RenderCommunityGoal(CommunityGoalDashboard? activeGoal, CommunityGoalDashboard? upcomingGoal)
     {
         CommunityRewardsPanel.Children.Clear();
         RankRewardsPanel.Children.Clear();
         ContributorsPanel.Children.Clear();
 
+        _primaryScheduledGoalStartUtc = 0;
+        _upcomingGoalStartUtc = upcomingGoal?.StartTimeUtc ?? 0;
+        RenderUpcomingGoalCard(activeGoal is not null ? upcomingGoal : null);
+
+        CommunityGoalDashboard? goal = activeGoal ?? upcomingGoal;
+        bool isScheduled = activeGoal is null && upcomingGoal is not null;
+
         if (goal == null)
         {
+            GoalStatusBadge.Background = new SolidColorBrush(Color.FromRgb(35, 42, 54));
+            GoalStatusText.Foreground = new SolidColorBrush(Color.FromRgb(159, 169, 186));
+            GoalStatusText.Text = "INACTIVE";
             GoalTitleText.Text = "No active Community Goal";
-            GoalDescriptionText.Text = "There is no server-wide goal running right now. Check back later for the next community objective.";
+            GoalDescriptionText.Text = "There is no server-wide goal running or scheduled right now. Check back later for the next community objective.";
             GoalProgressText.Text = "0 / 0";
             GoalPercentText.Text = "0.0%";
             GoalProgressBar.Value = 0;
+            GoalProgressBar.Visibility = Visibility.Visible;
+            GoalEndsLabelText.Text = "ENDS";
             GoalEndsText.Text = "Not active";
+            GoalPlayerContributionLabelText.Text = "YOUR CONTRIBUTION";
             GoalPlayerContributionText.Text = "No active goal";
+            ContributorsHeadingText.Text = "Top Contributors";
             CommunityRewardsPanel.Children.Add(CreateMutedText("No rewards are currently configured."));
             RankRewardsPanel.Children.Add(CreateMutedText("No contributor rewards are currently configured."));
             ContributorsPanel.Children.Add(CreateMutedText("No contributors yet."));
+            UpdateCommunityGoalCountdowns();
             return;
         }
 
         GoalTitleText.Text = goal.Name;
         GoalDescriptionText.Text = goal.Description;
-        GoalProgressText.Text = $"{goal.CurrentCount:N0} / {goal.TargetCount:N0}";
-        GoalPercentText.Text = $"{goal.Percent:0.0}%";
-        GoalProgressBar.Value = Math.Clamp(goal.Percent, 0, 100);
-        GoalEndsText.Text = goal.EndTimeUtc > 0
-            ? DateTimeOffset.FromUnixTimeSeconds(goal.EndTimeUtc).ToLocalTime().ToString("ddd, MMM d • h:mm tt")
-            : "Not set";
-        GoalPlayerContributionText.Text = goal.PlayerRank > 0
-            ? $"{goal.PlayerContribution:N0} • Rank #{goal.PlayerRank}"
-            : goal.PlayerContribution > 0 ? $"{goal.PlayerContribution:N0} contributed" : "No contribution yet";
+
+        if (isScheduled)
+        {
+            _primaryScheduledGoalStartUtc = goal.StartTimeUtc;
+            GoalStatusBadge.Background = new SolidColorBrush(Color.FromRgb(69, 56, 18));
+            GoalStatusText.Foreground = new SolidColorBrush(Color.FromRgb(250, 204, 21));
+            GoalStatusText.Text = "SCHEDULED";
+            GoalProgressText.Text = goal.StartTimeUtc > 0
+                ? DateTimeOffset.FromUnixTimeSeconds(goal.StartTimeUtc).ToLocalTime().ToString("ddd, MMM d • h:mm tt")
+                : "Start time not set";
+            GoalPercentText.Text = "";
+            GoalProgressBar.Value = 0;
+            GoalProgressBar.Visibility = Visibility.Collapsed;
+            GoalEndsLabelText.Text = "STARTS";
+            GoalEndsText.Text = goal.StartTimeUtc > 0
+                ? DateTimeOffset.FromUnixTimeSeconds(goal.StartTimeUtc).ToLocalTime().ToString("ddd, MMM d • h:mm tt")
+                : "Not set";
+            GoalPlayerContributionLabelText.Text = "STARTS IN";
+            GoalPlayerContributionText.Text = FormatCountdown(goal.StartTimeUtc);
+            ContributorsHeadingText.Text = "Contributor Rankings";
+        }
+        else
+        {
+            GoalStatusBadge.Background = new SolidColorBrush(Color.FromRgb(21, 60, 50));
+            GoalStatusText.Foreground = new SolidColorBrush(Color.FromRgb(117, 230, 173));
+            GoalStatusText.Text = "ACTIVE";
+            GoalProgressText.Text = $"{goal.CurrentCount:N0} / {goal.TargetCount:N0}";
+            GoalPercentText.Text = $"{goal.Percent:0.0}%";
+            GoalProgressBar.Value = Math.Clamp(goal.Percent, 0, 100);
+            GoalProgressBar.Visibility = Visibility.Visible;
+            GoalEndsLabelText.Text = "ENDS";
+            GoalEndsText.Text = goal.EndTimeUtc > 0
+                ? DateTimeOffset.FromUnixTimeSeconds(goal.EndTimeUtc).ToLocalTime().ToString("ddd, MMM d • h:mm tt")
+                : "Not set";
+            GoalPlayerContributionLabelText.Text = "YOUR CONTRIBUTION";
+            GoalPlayerContributionText.Text = goal.PlayerRank > 0
+                ? $"{goal.PlayerContribution:N0} • Rank #{goal.PlayerRank}"
+                : goal.PlayerContribution > 0 ? $"{goal.PlayerContribution:N0} contributed" : "No contribution yet";
+            ContributorsHeadingText.Text = "Top Contributors";
+        }
 
         AddRewardItems(CommunityRewardsPanel, goal.CommunityReward, Color.FromRgb(34, 211, 238));
         if (CommunityRewardsPanel.Children.Count == 0)
@@ -892,10 +945,67 @@ body { overflow-x: hidden; padding-right: 12px; }
         if (RankRewardsPanel.Children.Count == 0)
             RankRewardsPanel.Children.Add(CreateMutedText("No contributor rewards configured."));
 
-        foreach (DashboardContributor contributor in goal.TopContributors)
-            ContributorsPanel.Children.Add(CreateContributorRow(contributor));
-        if (ContributorsPanel.Children.Count == 0)
-            ContributorsPanel.Children.Add(CreateMutedText("No contributors yet."));
+        if (isScheduled)
+        {
+            ContributorsPanel.Children.Add(CreateMutedText("Progress and contributor rankings will appear when the goal begins."));
+        }
+        else
+        {
+            foreach (DashboardContributor contributor in goal.TopContributors)
+                ContributorsPanel.Children.Add(CreateContributorRow(contributor));
+            if (ContributorsPanel.Children.Count == 0)
+                ContributorsPanel.Children.Add(CreateMutedText("No contributors yet."));
+        }
+
+        UpdateCommunityGoalCountdowns();
+    }
+
+    private void RenderUpcomingGoalCard(CommunityGoalDashboard? goal)
+    {
+        if (goal is null)
+        {
+            UpcomingGoalCard.Visibility = Visibility.Collapsed;
+            UpcomingGoalTitleText.Text = "";
+            UpcomingGoalDescriptionText.Text = "";
+            UpcomingGoalStartsText.Text = "";
+            UpcomingGoalCountdownText.Text = "";
+            return;
+        }
+
+        UpcomingGoalTitleText.Text = goal.Name;
+        UpcomingGoalDescriptionText.Text = string.IsNullOrWhiteSpace(goal.Description)
+            ? $"{goal.GoalType} • Target {goal.TargetCount:N0}"
+            : goal.Description;
+        UpcomingGoalStartsText.Text = goal.StartTimeUtc > 0
+            ? DateTimeOffset.FromUnixTimeSeconds(goal.StartTimeUtc).ToLocalTime().ToString("ddd, MMM d • h:mm tt")
+            : "Start time not set";
+        UpcomingGoalCountdownText.Text = FormatCountdown(goal.StartTimeUtc);
+        UpcomingGoalCard.Visibility = Visibility.Visible;
+    }
+
+    private void UpdateCommunityGoalCountdowns()
+    {
+        if (_primaryScheduledGoalStartUtc > 0)
+            GoalPlayerContributionText.Text = FormatCountdown(_primaryScheduledGoalStartUtc);
+        if (_upcomingGoalStartUtc > 0 && UpcomingGoalCard.Visibility == Visibility.Visible)
+            UpcomingGoalCountdownText.Text = FormatCountdown(_upcomingGoalStartUtc);
+    }
+
+    private static string FormatCountdown(long startTimeUtc)
+    {
+        if (startTimeUtc <= 0)
+            return "Start time unavailable";
+
+        TimeSpan remaining = DateTimeOffset.FromUnixTimeSeconds(startTimeUtc) - DateTimeOffset.UtcNow;
+        if (remaining <= TimeSpan.Zero)
+            return "Starting now...";
+
+        int days = (int)remaining.TotalDays;
+        if (days > 0)
+            return $"{days}d {remaining.Hours}h {remaining.Minutes}m {remaining.Seconds}s";
+        if (remaining.Hours > 0)
+            return $"{remaining.Hours}h {remaining.Minutes}m {remaining.Seconds}s";
+        return $"{remaining.Minutes}m {remaining.Seconds}s";
     }
 
     private static TextBlock CreateMutedText(string text) => new()
@@ -909,21 +1019,83 @@ body { overflow-x: hidden; padding-right: 12px; }
     private static void AddRewardItems(Panel panel, DashboardReward reward, Color accent)
     {
         if (reward.G > 0)
-            panel.Children.Add(CreateRewardChip("CURRENCY", $"{reward.G:N0} G", Color.FromRgb(250, 204, 21)));
-        foreach (DashboardRewardItem item in reward.Items)
         {
-            Color itemAccent = item.Category.Equals("Costumes", StringComparison.OrdinalIgnoreCase)
-                ? Color.FromRgb(244, 114, 182)
-                : accent;
-            panel.Children.Add(CreateRewardChip(item.Category.ToUpperInvariant(), item.Name, itemAccent));
+            panel.Children.Add(CreateRewardCategoryGroup(
+                "CURRENCY",
+                new[] { $"{reward.G:N0} G" },
+                Color.FromRgb(250, 204, 21)));
+        }
+
+        foreach (IGrouping<string, DashboardRewardItem> categoryGroup in reward.Items
+                     .Where(item => !string.IsNullOrWhiteSpace(item.Name))
+                     .GroupBy(item => NormalizeRewardCategory(item.Category), StringComparer.OrdinalIgnoreCase))
+        {
+            string category = categoryGroup.Key;
+            Color categoryAccent = RewardCategoryAccent(category, accent);
+            panel.Children.Add(CreateRewardCategoryGroup(
+                category.ToUpperInvariant(),
+                categoryGroup.Select(item => item.Name),
+                categoryAccent));
         }
     }
 
-    private static Border CreateRewardChip(string category, string name, Color accent)
+    private static string NormalizeRewardCategory(string? category)
+    {
+        string value = (category ?? string.Empty).Trim();
+        if (value.Length == 0)
+            return "Other Rewards";
+
+        return value.ToLowerInvariant() switch
+        {
+            "costume" or "costumes" => "Costumes",
+            "character token" or "character tokens" or "hero token" or "hero tokens" => "Character Tokens",
+            "team-up" or "team-ups" or "teamup" or "teamups" => "Team-Ups",
+            "artifact" or "artifacts" => "Artifacts",
+            "item" or "items" => "Items",
+            "currency" => "Currency",
+            _ => value
+        };
+    }
+
+    private static Color RewardCategoryAccent(string category, Color fallback)
+    {
+        return category.ToLowerInvariant() switch
+        {
+            "costumes" => Color.FromRgb(244, 114, 182),
+            "character tokens" => Color.FromRgb(34, 211, 238),
+            "team-ups" => Color.FromRgb(74, 222, 128),
+            "artifacts" => Color.FromRgb(251, 146, 60),
+            "currency" => Color.FromRgb(250, 204, 21),
+            _ => fallback
+        };
+    }
+
+    private static Border CreateRewardCategoryGroup(string category, IEnumerable<string> rewardNames, Color accent)
     {
         StackPanel stack = new();
-        stack.Children.Add(new TextBlock { Text = category, Foreground = new SolidColorBrush(accent), FontSize = 8, FontWeight = FontWeights.Bold });
-        stack.Children.Add(new TextBlock { Text = name, Foreground = Brushes.White, FontSize = 11, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, MaxWidth = 220 });
+        stack.Children.Add(new TextBlock
+        {
+            Text = category,
+            Foreground = new SolidColorBrush(accent),
+            FontSize = 8,
+            FontWeight = FontWeights.Bold,
+            Margin = new Thickness(0, 0, 0, 5)
+        });
+
+        foreach (string rewardName in rewardNames.Where(name => !string.IsNullOrWhiteSpace(name)))
+        {
+            stack.Children.Add(new TextBlock
+            {
+                Text = rewardName,
+                Foreground = Brushes.White,
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                TextWrapping = TextWrapping.Wrap,
+                MaxWidth = 220,
+                Margin = new Thickness(0, 0, 0, 3)
+            });
+        }
+
         return new Border
         {
             Background = new SolidColorBrush(Color.FromRgb(16, 22, 30)),

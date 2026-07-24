@@ -6,6 +6,7 @@ public sealed class PlayerDashboardResponse
     public string Error { get; set; } = "";
     public DashboardNotice? Notice { get; set; }
     public CommunityGoalDashboard? CommunityGoal { get; set; }
+    public CommunityGoalDashboard? UpcomingCommunityGoal { get; set; }
     public AccountDashboard Account { get; set; } = new();
     public List<CommunityGoalRewardClaimDashboard> RewardClaims { get; set; } = [];
     public List<CommunityGoalHistoryDashboard> CommunityGoalHistory { get; set; } = [];
@@ -31,7 +32,9 @@ public sealed class CommunityGoalDashboard
     public int CurrentCount { get; set; }
     public int TargetCount { get; set; }
     public double Percent { get; set; }
+    public long StartTimeUtc { get; set; }
     public long EndTimeUtc { get; set; }
+    public bool IsScheduled { get; set; }
     public DashboardReward CommunityReward { get; set; } = new();
     public List<DashboardRankReward> RankRewards { get; set; } = [];
     public List<DashboardContributor> TopContributors { get; set; } = [];
